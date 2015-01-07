@@ -1,0 +1,187 @@
+package com.Sts.Types;
+
+import com.Sts.DBTypes.*;
+import com.Sts.MVC.View3d.StsGLPanel3d;
+import com.Sts.Utilities.StsConcavePolygon;
+import com.Sts.Utilities.StsException;
+import com.Sts.Utilities.StsMath;
+
+import javax.media.opengl.GL;
+import javax.media.opengl.glu.GLU;
+
+/**
+ * Created by IntelliJ IDEA.
+ * User: Tom Lasseter
+ * Date: Nov 9, 2007
+ * Time: 8:17:37 PM
+ * To change this template use File | Settings | File Templates.
+ */
+public class StsGolderFracture extends StsSerialize
+{
+    int fractureNumber;
+	int nNodes;
+	public float[][] vertices;
+	public float[] properties;
+    float[] normal;
+	public float[] center;
+    long time;
+    boolean highlight = false;
+    StsDynamicSensor sensor = null;
+    int sensorIndex = -1;
+
+	transient public int setNumber;
+	transient public int nVertices;
+	/** Display lists should be used (controlled by View:Display Options) */
+	transient boolean useDisplayLists;
+	/** Display lists currently being used for surface geometry */
+	transient boolean usingDisplayLists = true;
+
+    public StsGolderFracture()
+    {
+    }
+
+
+	static public StsGolderFracture fractureConstructor(String[] tokens)
+	{
+		return new StsGolderFracture(tokens, 3);
+	}
+
+	private StsGolderFracture(String[] tokens, int nSkip)
+	{
+		setProperties(tokens, nSkip);
+	}
+
+	static public StsGolderFracture tessFractureConstructor(String[] tokens, float[][] allVertices)
+	{
+		return new StsGolderFracture(tokens, allVertices);
+	}
+
+	private StsGolderFracture(String[] tokens, float[][] allVertices)
+	{
+		int nVertex = -1;
+		try
+		{
+			fractureNumber = Integer.parseInt(tokens[0]);
+			nNodes = Integer.parseInt(tokens[1]);
+			vertices = new float[nNodes][];
+			for(int n = 0; n < nNodes; n++)
+			{
+				nVertex = Integer.parseInt(tokens[n+2]) - 1;
+				vertices[n] = allVertices[nVertex];
+			}
+			computeNormal();
+			setProperties(tokens, nNodes + 2);
+		}
+		catch(Exception e)
+		{
+			StsException.systemError(this, "constructor", "nNodes " + nNodes + " nVertex " + nVertex + " nTotalVertices " + allVertices.length);
+		}
+	}
+
+	private void computeNormal()
+	{
+		int n00, n01, n10, n11;
+		int nVertices = vertices.length;
+		n00 = 0;
+		n01 = nVertices/2;
+		n10 = n01/2;
+		n11 = (n01 + nVertices)/2;
+		float[] v0 = StsMath.subtract(vertices[n01],  vertices[n00]);
+		float[] v1 = StsMath.subtract(vertices[n11],  vertices[n10]);
+		normal = StsMath.leftCrossProduct(v0, v1);
+		StsMath.normalize(normal);
+	}
+
+	private void setProperties(String[] tokens, int nSkip)
+	{
+		int nProperties = tokens.length - nSkip;
+		properties = new float[nProperties];
+		for(int n = nSkip, i = 0; n < tokens.length; n++, i++)
+			properties[i] = Float.parseFloat(tokens[n]);
+	}
+
+    public void setHighlight(StsDynamicSensor dSensor, int index)
+    {
+        this.highlight = true;
+        sensor = dSensor;
+        sensorIndex = index;
+    }
+
+    public void clearHighlight()
+    {
+        highlight = false;
+        sensor = null;
+        sensorIndex = -1;
+    }
+
+	public void addVertices(float[][] vertices)
+	{
+		this.vertices = vertices;
+		computeCenter();
+	}
+
+	private void computeCenter()
+	{
+		center = StsMath.average(vertices, 3);
+	}
+
+	public void addNormal(float[] normal)
+	{
+		this.normal = normal;
+//		debugCheckNormal();
+	}
+
+	private void debugCheckNormal()
+	{
+		int n00, n01, n10, n11;
+		int nVertices = vertices.length;
+		n00 = 0;
+		n01 = nVertices/2;
+		n10 = n01/2;
+		n11 = (n01 + nVertices)/2;
+		float[] v0 = StsMath.subtract(vertices[n01],  vertices[n00]);
+		float[] v1 = StsMath.subtract(vertices[n11],  vertices[n10]);
+		float[] debugNormal = StsMath.leftCrossProduct(v0, v1);
+		StsMath.normalize(normal);
+		StsMath.normalize(debugNormal);
+		float dot = StsMath.dot(normal, debugNormal);
+		// StsException.systemDebug(this, "debugCheckNormal", "dot: " + dot);
+		if(dot < 0.0f)
+			StsMath.scale(normal, -1.0f);
+	}
+
+    public long getTime()
+    {
+        if(sensor != null)
+            return ((StsTimeCurve)sensor.getTimeCurves().getElement(0)).getTimeVector().getValue(sensorIndex);
+        else
+            return time;
+    }
+    public boolean isHighlighted()
+    {
+        return highlight;
+    }
+	public void display(StsGLPanel3d glPanel3d, boolean displayEdges, StsColor color)
+	{
+        float colorFloat = 1.0f;
+        if(sensor != null)
+        {
+            if(sensor.getColorFloats() != null)
+                colorFloat = sensor.getColorFloats()[sensorIndex];
+            color = sensor.defineColor(colorFloat);
+        }
+        GL gl = glPanel3d.getGL();
+        color.setGLColor(gl);
+        gl.glPolygonMode(gl.GL_FRONT_AND_BACK, gl.GL_FILL);
+        gl.glBegin(GL.GL_POLYGON);
+		gl.glNormal3fv(normal, 0);
+		for (float[] vertex : vertices)
+		{
+		    gl.glNormal3fv(normal, 0);
+		    gl.glVertex3fv(vertex, 0);
+		}
+        gl.glEnd();
+     }
+
+	public float getPropertyValue(int index)  { return properties[index]; }
+}

@@ -1,0 +1,50 @@
+package com.Sts.Actions.Wizards.PreStack3d;
+
+import com.Sts.Actions.Wizards.PostStack.*;
+import com.Sts.Actions.Wizards.Seismic.*;
+import com.Sts.Actions.Wizards.WizardHeaders.*;
+
+/**
+ * Created by IntelliJ IDEA.
+ * User: Tom Lasseter
+ * Date: Oct 15, 2007
+ * Time: 9:31:12 AM
+ * To change this template use File | Settings | File Templates.
+ */
+public class StsPreStackFileFormat3d extends StsPostStackFileFormat
+{
+    public StsPreStackFileFormat3d(StsSeismicWizard wizard)
+    {
+		super(wizard);
+        this.wizard = wizard;
+        panel = new StsPreStackFileFormatPanel(wizard, this);
+		header = new StsHeaderPanel();
+		setPanels(panel, header);
+        setTitlesAndInfo();
+	}
+
+    protected void setTitlesAndInfo()
+    {
+        header.setTitle("Prestack 3d SegY Definition");
+		header.setSubtitle("Check and Set File Formats");
+		header.setInfoText(wizardDialog,
+                "(1) Navigate to the directory containing the SegY Files using the Dir Button.\n" +
+                "    All SegY Files in the selected directory will be placed in the left list.\n" +
+                "      **** File names must have a .sgy, .SGY, .segy or .SEGY suffix *****\n" +
+                "(2) Select files from the left list and place them in the right using the controls between the lists.\n" +
+                "      **** All selected files will be scanned and placed in the table at bottom of screen with stats****\n" +
+                "      **** from a random scan for review to ensure files are read correctly and disk space is adequate. ****\n" +
+                "      **** If scan fails, adjust parameters on this and next screen before proceeding w/ processing ****\n" +
+                "(3) Select a pre-defined Segy Format template if one exists for the selected files\n" +
+                "      **** Format templates are saved from previous executions of this wizard.\n" +
+                "(4) Set the appropriate sample format (defaults to header value), units, endianness and name.\n" +
+                "      **** A single volume name is applied to all selected volumes. ****\n" +
+                "      **** All files must be the same format to be processed in one run ****\n" +
+                "(5) Set the scan percentage (# of samples of the SegY Files scanned) for verifying correct file reading.\n" +
+                "      **** Random scanning of samples is used to determine if file is being read correctly.\n" +
+                "(6) Specify whether the selected files are time/depth, the format, header sizes and start Z.\n" +
+                "      **** Headers can be overridden if values in header are incorrect, review headers before overriding ****\n" +
+                "(7) Once all selected file formats are correctly defined press the Next>> Button\n" +
+                "      **** Dont worry if value in table are incorrect, next screen allows trace header mapping.****");
+    }
+}

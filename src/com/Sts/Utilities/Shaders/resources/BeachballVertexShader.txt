@@ -1,0 +1,19 @@
+varying vec4 ecPosition;   // surface position in eye coordinates
+varying vec4 ecBallCenter;
+varying vec3 ecXAxis;
+varying vec3 ecYAxis;
+
+vec4 BallCenter = vec4(0.0, 0.0, 0.0, 1.0);   // ball center in modelling coordinates
+vec4 xAxisPoint = vec4(1.0, 0.0, 0.0, 1.0);
+vec4 yAxisPoint = vec4(0.0, 1.0, 0.0, 1.0);
+
+void main()
+{
+    ecPosition   = gl_ModelViewMatrix * gl_Vertex;
+    ecBallCenter = gl_ModelViewMatrix * BallCenter;
+    gl_Position  = ftransform();
+    vec4 ecXAxisPoint = gl_ModelViewMatrix * xAxisPoint;
+    vec4 ecYAxisPoint = gl_ModelViewMatrix * yAxisPoint;
+    ecXAxis = ecXAxisPoint.xyz - ecBallCenter.xyz;
+    ecYAxis = ecYAxisPoint.xyz - ecBallCenter.xyz;
+}

@@ -1,0 +1,24 @@
+varying vec4 ecPosition;   // surface position in eye coordinates
+varying vec4 ecBallCenter; // ball center in eye coordinates
+
+uniform vec4  materialColor;
+
+void main()
+{
+    vec3  normal = normalize(ecPosition.xyz - ecBallCenter.xyz);
+    vec4  color = materialColor;
+
+    float nDotVP = max(0.0, dot(normal, normalize(vec3 (gl_LightSource[0].position))));  // normal dot light direction
+
+    if (nDotVP == 0.0)
+        color = (gl_LightSource[0].ambient + gl_LightSource[0].diffuse * nDotVP)*color;
+    else
+    {
+        float nDotHV = max(0.0, dot(normal, vec3 (gl_LightSource[0].halfVector))); // normal dot light half vector
+        float pf = pow(nDotHV, gl_FrontMaterial.shininess);
+        vec4 Specular = gl_LightSource[0].specular * pf;
+        color = (gl_LightSource[0].ambient + gl_LightSource[0].diffuse * nDotVP)*color + Specular*gl_FrontMaterial.specular;
+    }
+    color = clamp( color, 0.0, 1.0 );
+    gl_FragColor = color;
+}

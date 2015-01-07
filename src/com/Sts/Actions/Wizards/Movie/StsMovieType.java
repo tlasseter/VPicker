@@ -1,0 +1,55 @@
+
+//Title:        S2S: Seismic-to-simulation
+//Version:
+//Copyright:    Copyright (c) 2002
+//Author:       Stuart A. Jackson
+//Company:      S2S Systems LLC
+//Description:  Web-enabled Integrated Interpretation System
+
+package com.Sts.Actions.Wizards.Movie;
+
+import com.Sts.Actions.Wizards.*;
+import com.Sts.Actions.Wizards.WizardHeaders.*;
+
+import java.awt.*;
+
+public class StsMovieType extends StsWizardStep
+{
+    StsMovieTypePanel panel;
+    StsHeaderPanel header;
+
+    public StsMovieType(StsWizard wizard)
+    {
+        super(wizard);
+        panel = new StsMovieTypePanel(wizard, this);
+        header = new StsHeaderPanel();
+        setPanels(panel, header);
+        panel.setPreferredSize(new Dimension(200, 250));
+        header.setTitle("Movie Definition");
+        header.setSubtitle("Type Definition");
+        header.setInfoText(wizardDialog,"(1) Specify the name of the animation/movie being produced.\n" +
+                           "(2) Press the Next>> Button.\n");
+        header.setLink("http://www.s2ssystems.com/Protected/Marketing/AppLinks.html#Movie");
+    }
+
+    public boolean start()
+    {
+        return true;
+    }
+
+    public boolean end()
+    {
+        return true;
+    }
+
+    public String getMovieName()
+    {
+        return panel.getMovieName();
+    }
+    public int getDirection()
+    {
+        return panel.getDirection();
+    }
+
+}
+
