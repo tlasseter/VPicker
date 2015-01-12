@@ -39,7 +39,7 @@ public class StsPatchVolumeClass extends StsClass implements StsClassCursorDispl
 
     public void drawOnCursor3d(StsGLPanel3d glPanel3d, int dirNo, float dirCoordinate, StsPoint[] planePoints, boolean isDragging)
     {
-        if(!displaySurfs) return;
+        // if(!displaySurfs) return;
         if (currentObject == null) return;
         StsPatchVolume patchVolume = (StsPatchVolume) currentObject;
         patchVolume.drawOnCursor3d(glPanel3d, dirNo, dirCoordinate);

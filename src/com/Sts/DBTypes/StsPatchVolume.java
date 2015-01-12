@@ -39,17 +39,23 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
     transient public int interpolatedSliceMax;
     transient StsPatchVolumeClass patchVolumeClass;
     transient public StsCroppedBoundingBox croppedBoundingBox;
-    /** gridList contains patches which have been completed. gridList patches are added from prevRowGrids when they are disconnected
-     *  or when the process is completed and remaining grids are added.  Because an original rowGrid patch maybe multilayered,
-     *  a rowGrid patch may generate several gridList patches (one for each layer).
-     */
+
+    /** gridList contains patches which have been completed. At the end of a row, prevRowGrids contains disconnected grids which
+     *  are added to gridList patches.  At the end of all rows, remaining grids are in rowGrids which are then added to gridList. */
     transient ArrayList<StsPatchGrid> gridList;
+
     /** rowGrids contains new patches and existing patches from previous row connected to the latest row;
-     *  at the completion of the row, these become the previousRowGrids.
-     */
+     *  at the completion of the row, these become the previousRowGrids. At start of row, its initialized to empty.  If a new grid is created,
+     *  it is added to rowGrids.  If an existing grid is connected to a point in the row, it is added to rowGrid and removed from prevRowGrid.
+     *  At the end of the row, grids still connected are in rowGrid, and disconnected ones are in prevRowGrids. These disconnected grids are
+     *  added to gridList.  prevRowGrids is then set to rowGrids and rowGrids initialized for the next row. */
     transient HashMap<Integer, StsPatchGrid> rowGrids = null;
-    /** prevRowGrids are the active patches in the previousRow; when making a connection to a point in the previous row, we look here for a patch */
+    transient Iterator<StsPatchGrid> rowGridsIterator;
+
+    /** prevRowGrids are the active patches in the previousRow; when making a connection to a point in the previous row, we look here for a patch. */
     transient HashMap<Integer, StsPatchGrid> prevRowGrids = null;
+    transient Iterator<StsPatchGrid> prevRowGridsIterator;
+
     /** a temporary array built at initialization with final patches sorted by col, row, and z */
     transient public StsPatchGrid[] colSortedPatchGrids;
     /** total number of points on all patches on this volume */
@@ -91,7 +97,7 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
     transient int nIterations;
 
     /** row currently being computed: used for debug print out only */
-    transient int row;
+    transient int row, col, volRow, volCol;
     transient int nPatchPointsMin;
     transient public byte curveType = CURVPos;
     transient public int filterSize = 0;
@@ -103,11 +109,11 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
     transient StsPatchGrid cursorPointPatch;
     transient private StsPatchGrid[] selectedPatchGrids;
 
-    /** if the row or col correl is < this value, that link and the associated edge is not drawn */
-    transient float minLinkCorrel = 0.0f;
-
     transient float[] histogramValues;
     transient int nHistogramValues = 10000;
+
+    /** if the row or col correl is < this value, that link and the associated edge is not drawn */
+    static public float minLinkCorrel = 0.0f;
 
     static protected StsObjectPanel objectPanel = null;
 
@@ -182,7 +188,7 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
 
     static final float largeFloat = StsParameters.largeFloat;
 
-    static final boolean debug = true;
+    static final boolean debug = false;
     static final boolean runTimer = false;
     static StsTimer timer;
 
@@ -201,6 +207,650 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
         zDomain = seismicVolume.zDomain;
         stsDirectory = seismicVolume.stsDirectory;
         initialize(currentModel);
+    }
+
+    /** This is central method for constructing the volume of patchGrids.
+     *  For each row, we examine correlation with traces in same row & prev col and same col & prev row.
+     *
+     * @param pickPanel graphics panel with progress bar updated as each row completed
+     */
+    public void constructPatchVolume(StsPatchPickPanel pickPanel)
+    {
+        StsProgressBar progressPanel = pickPanel.progressBar;
+        windowSize = pickPanel.corWavelength;
+        pickDifWavelengths = pickPanel.maxPickDif;
+        float minAmpFraction = pickPanel.minAmpFraction;
+        float maxStretch = pickPanel.maxStretch;
+        pickType = pickPanel.pickType;
+        nPatchPointsMin = pickPanel.minPatchSize;
+        isIterative = pickPanel.isIterative;
+        autoCorMax = pickPanel.autoCorMax;
+        autoCorMin = pickPanel.autoCorMin;
+        autoCorInc = pickPanel.autoCorInc;
+        manualCorMin = pickPanel.manualCorMin;
+        initializeLists();
+
+        if(!isIterative)
+        {
+            nIterations = 1;
+            stretchCorrelations = new float[]{manualCorMin};
+        }
+        else
+        {
+            nIterations = StsMath.ceiling(1 + (autoCorMax - autoCorMin) / autoCorInc);
+            stretchCorrelations = new float[nIterations];
+            float stretchCorrelation = autoCorMax;
+            for(int n = 0; n < nIterations; n++, stretchCorrelation -= autoCorInc)
+                stretchCorrelations[n] = stretchCorrelation;
+        }
+
+        rowSortedPatchGrids = new StsPatchGrid[0];
+        colSortedPatchGrids = null;
+        initialize();
+        StsPatchGrid.staticInitialize();
+
+        if(progressPanel != null)
+            progressPanel.initialize(croppedBoundingBox.nRows);
+
+        TracePoints[] rowTracePoints = null; //new TracePoints[nCols];
+        float absSeismicDataMax = Math.min(Math.abs(seismicVolume.dataMin), Math.abs(seismicVolume.dataMax));
+        minDataAmplitude = minAmpFraction * absSeismicDataMax;
+        initializeParameters();
+        initializeToBoundingBox(croppedBoundingBox);
+        initializeSliceInterpolation();
+
+        int croppedRowMin = croppedBoundingBox.rowMin;
+        int croppedColMin = croppedBoundingBox.colMin;
+        int croppedSliceMin = croppedBoundingBox.sliceMin;
+        int nCroppedSlices = croppedBoundingBox.sliceMax - croppedSliceMin + 1;
+        int nVolSlices = seismicVolume.nSlices;
+        float[] traceValues = new float[nCroppedSlices];
+
+        try
+        {
+            // row & col refer to the row and col in a croppedVolume over which picker is to run
+            // volRow & volCol define the actual row and col in the volume (used only for reference)
+            for (row = 0, volRow = croppedRowMin; row < nRows; row++, volRow++)
+            {
+                //statusArea.setProgress(row*40.f/nRows);
+                TracePoints[] prevRowTracesPoints = rowTracePoints;
+                rowTracePoints = new TracePoints[nCols];
+                TracePoints prevRowTracePoints = null;
+                incrementLists();
+                // get row plane from seismicVolume at this volRow
+                FloatBuffer rowFloatBuffer = seismicVolume.getRowPlaneFloatBuffer(volRow, croppedColMin);
+                if (rowFloatBuffer == null) return;
+                // if(croppedColMin > 0) rowFloatBuffer.position(croppedColMin * nVolSlices);
+                for (col = 0, volCol = croppedColMin; col < nCols; col++, volCol++)
+                {
+                    // StsException.systemDebug(this, "constructPatchVolume", "col loop, col: " + col);
+                    rowFloatBuffer.position(volCol * nSlices + croppedSliceMin);
+                    rowFloatBuffer.get(traceValues);
+
+                    TracePoints tracePoints = new TracePoints(row, col, traceValues, pickType, nSlices, croppedSliceMin, nVolSlices);
+                    rowTracePoints[col] = tracePoints;
+                    // prevColTracePoints are tracePoints in prev row & same col
+                    TracePoints prevColTracePoints = null;
+                    if (prevRowTracesPoints != null)
+                        prevColTracePoints = prevRowTracesPoints[col];
+                    addTracePatches(tracePoints, prevColTracePoints, prevRowTracePoints);
+                    prevRowTracePoints = tracePoints;
+                }
+                processPrevRowGrids(row);
+                if (progressPanel == null) continue;
+                if (progressPanel.isCanceled())
+                {
+                    progressPanel.setDescriptionAndLevel("Cancelled by user.", StsProgressBar.ERROR);
+                    return;
+                }
+                progressPanel.setValue(row + 1);
+            }
+            addRemainingGrids();
+            finish();
+            getPatchVolumeClass().setDisplayCurvature(true);
+            progressPanel.finished();
+        }
+        catch(Exception e)
+        {
+            StsException.outputWarningException(this, "constructPatchVolume", e);
+        }
+    }
+
+    /** creates correlated connections between this trace and traces at prev row & same col and prev col & same row
+     *
+     * @param trace new trace where correlated patchPoints are to be added.
+     * @param prevColTrace prev trace in same col, prev row
+     * @param prevRowTrace prev trace in same row, prev col
+     */
+    private void addTracePatches(TracePoints trace, TracePoints prevColTrace, TracePoints prevRowTrace)
+    {
+        if(prevRowTrace == null && prevColTrace == null) return;
+
+        StsPatchPoint[] newPatchPoints = trace.tracePatchPoints;
+        int nNewPatchPoints = newPatchPoints.length;
+        if(nNewPatchPoints == 0) return;
+
+        // For each patchPoint, check previous traces for points which are same type and just above or below this new point
+        // and find which of these two possible prev trace points has the best correlation.
+        // If this correlation is above the minCorrelation, add this new point to the prev point patch.
+        // If the new point already has a patch (because it correlated with one of the other of the 4 otherTraces, then the addPatchPointToPatch
+        // will merge the two patches.
+        for(int i = 0; i < nIterations; i++)
+        {
+            initializeTraceIndices(trace, prevRowTrace, prevColTrace);
+            float minStretchCorrelation = stretchCorrelations[i];
+            for(int centerPointIndex = 0; centerPointIndex < nNewPatchPoints; centerPointIndex++)
+            {
+                StsPatchPoint centerPoint = newPatchPoints[centerPointIndex];
+                if(centerPoint.getPatchGrid() != null) continue;
+                CorrelationWindow window;
+                window = new CorrelationWindow(trace, centerPoint, centerPointIndex);
+                if(!window.initialize()) continue;
+                if(prevColTrace != null) checkAddColConnection(window, prevColTrace, minStretchCorrelation);
+                if(prevRowTrace != null) checkAddRowConnection(window, prevRowTrace, minStretchCorrelation);
+            }
+        }
+    }
+
+    private void checkAddRowConnection(CorrelationWindow window, TracePoints otherTrace, float minStretchCorrelation)
+    {
+        checkAddConnection(window, otherTrace, minStretchCorrelation, true);
+    }
+
+    private void checkAddColConnection(CorrelationWindow window, TracePoints otherTrace, float minStretchCorrelation)
+    {
+        checkAddConnection(window, otherTrace, minStretchCorrelation, false);
+    }
+
+    private void checkAddConnection(CorrelationWindow window, TracePoints otherTrace, float minStretchCorrelation, boolean isRow)
+    {
+        CorrelationWindow matchingWindow = window.findMatchingWindows(otherTrace, minStretchCorrelation);
+        if(matchingWindow == null) return;
+        StsPatchPoint centerPoint = window.centerPoint;
+        StsPatchPoint otherCenterPoint = matchingWindow.centerPoint;
+        otherTrace.centerPointIndex = matchingWindow.centerPointIndex;
+        double distance = Math.abs(otherCenterPoint.slice - window.centerSlice);
+        float correl = matchingWindow.stretchCorrelation;
+        addPatchConnection(centerPoint, otherCenterPoint, correl, isRow);
+    }
+    /**
+     * Given a newPatchPoint at newRow-newCol, which correlates with a prevPatchPoint at prevRow-prevCol which is possibly part of a patchGrid in the prevPatchGridsSet,
+     * combine these two points in the same patch.  The prevPatchPoint may be on the previous col (same row), or previous row (same col).
+     * If the previousPatchPoint is not part of an existing patchGrid (prevID == -1), then we will create a new patchGrid and add both points to it.
+     * If the previousPatchPoint is part of a patchGrid we will add the newPatchPoint to this patchGrid, unless the newPatchPoint already belongs to another patchGrid
+     * (this occurs when we first correlate with the previous column and find one patchGrid and also correlate with the previous row and find a different patchGrid).
+     */
+    public void addPatchConnection(StsPatchPoint newPatchPoint, StsPatchPoint otherPatchPoint, float correl, boolean isRow)
+    {
+        StsPatchGrid patchGrid = null;
+
+        if(correl < minLinkCorrel) return;
+        StsPatchGrid otherPatchGrid = otherPatchPoint.getPatchGrid();
+        StsPatchGrid newPatchGrid = newPatchPoint.getPatchGrid();
+
+        if(newPatchGrid == null)
+        {
+            if(otherPatchGrid == null) // prevPatchGrid doesn't exist, so create it and add otherPoint to it
+            {
+                patchGrid = StsPatchGrid.construct(this, newPatchPoint.pointType);
+                patchGrid.addPatchPoint(otherPatchPoint);
+            }
+            else // otherPatchGrid does exist, so use it
+            {
+                patchGrid = otherPatchGrid;
+                if(patchGrid == null) return;
+            }
+            // this point can't overlap this grid, so we don't need to call checkAddPatchPoint
+            patchGrid.addPatchPoint(newPatchPoint);
+            //patchGrid.addCorrelation(otherPatchPoint, newPatchPoint, correl);
+        }
+        else // id != -1 means this point was just added to a patch from prev connection and the patchGrid would have been added to the rowGrids array
+        {
+            if(otherPatchGrid == null) // the otherPoint is not assigned to a patch; assign it to this one; don't add point to rowGrids unless it overlaps and addedGrid created
+            {
+                patchGrid = newPatchGrid;
+                if(patchGrid == null) return; // patchGrid not found; systemDebugError was printed
+                // otherPatchPoint doesn't have a patchGrid, but newPatchPoint does; try to add otherPatchPoint to newPatchGrid,
+                // but if it overlaps, created an addedPatchGrid containing otherPatchPoint and a clone of newPatchPoint
+                // return this addedPatchGrid or patchGrid (if no new grid added)
+                patchGrid = patchGrid.checkAddPatchPoint(otherPatchPoint, newPatchPoint);
+                //patchGrid.addCorrelation(otherPatchPoint, newPatchPoint, correl);
+                //checkAddPatchGridToRowGrids(patchGrid);
+            }
+            else if(otherPatchGrid.id == newPatchGrid.id) // otherPoint is already assigned to the same patch: addCorrelation
+            {
+                patchGrid = newPatchGrid;
+                if(patchGrid == null) return; // patchGrid not found; systemDebugError was printed
+                //checkAddPatchGridToRowGrids(patchGrid);
+                //patchGrid.addCorrelation(otherPatchPoint, newPatchPoint, correl);
+            }
+            // prevPoint and this point belong to different patches: merge newPatchGrid into prevPatchGrid and add connection
+            // if we can't merge OK, then we create a new patch with newPoint and clone of connected otherPoint
+            else
+                patchGrid = checkMergePatchGrids(otherPatchPoint, newPatchPoint, correl);
+        }
+
+        if(patchGrid != null)
+        {
+            patchGrid.addCorrelation(otherPatchPoint, newPatchPoint, correl);
+            checkAddPatchGridToRowGrids(patchGrid);
+        }
+    }
+
+    private StsPatchGrid checkMergePatchGrids(StsPatchPoint otherPatchPoint, StsPatchPoint newPatchPoint, float correl)
+    {
+        StsPatchGrid mergedGrid, removedGrid;
+
+        StsPatchGrid otherPatchGrid = otherPatchPoint.getPatchGrid();
+        if(otherPatchGrid == null) return null;
+        StsPatchGrid newPatchGrid = newPatchPoint.getPatchGrid();
+        if(newPatchGrid == null) return null;
+        if(StsPatchGrid.mergePatchPointsOK(otherPatchGrid, newPatchGrid))
+        {
+            if(otherPatchGrid.id < newPatchGrid.id)
+            {
+                mergedGrid = otherPatchGrid;
+                removedGrid = newPatchGrid;
+            }
+            else
+            {
+                mergedGrid = newPatchGrid;
+                removedGrid = otherPatchGrid;
+            }
+            // merge shouldn't fail, so a return of false indicates a problem: bail out
+            if(!mergedGrid.mergePatchPoints(removedGrid)) return null;
+
+            //checkAddPatchGridToRowGrids(mergedGrid);
+            //mergedGrid.addCorrelation(otherPatchPoint, newPatchPoint, correl);
+            removePatchGridFromLists(removedGrid);
+            return mergedGrid;
+        }
+        else // can't merge: find larger grid and add a clone of the overlapped point from the smaller grid to it
+        {
+            StsPatchGrid changedGrid;
+            StsPatchPoint clonedPoint;
+            if(otherPatchGrid.nPatchPoints >= newPatchGrid.nPatchPoints)
+            {
+                changedGrid = otherPatchGrid;
+                clonedPoint = newPatchPoint.clone();
+                changedGrid.addPatchPoint(clonedPoint);
+                changedGrid.addCorrelation(otherPatchPoint, clonedPoint, correl);
+            }
+            else
+            {
+                changedGrid = newPatchGrid;
+                clonedPoint = otherPatchPoint.clone();
+                changedGrid.addPatchPoint(clonedPoint);
+                changedGrid.addCorrelation(clonedPoint, newPatchPoint, correl);
+            }
+            checkAddPatchGridToRowGrids(changedGrid);
+            return null; // return null indicating this grid has been completely processed
+        }
+    }
+
+
+    private void checkAddPatchGridToRowGrids(StsPatchGrid patchGrid)
+    {
+        int patchID = patchGrid.id;
+        if(patchGrid.rowGridAdded) return;
+        boolean debug = patchGrid.debug();
+        StsPatchGrid value = rowGrids.put(patchID, patchGrid); // if return is null, no value exists at this key
+        patchGrid.rowGridAdded = true;
+        if(debug)
+        {
+            if(value == null)
+                StsException.systemDebug(this, "checkAddPatchGridToRowGrids", "patch " + patchID + " added to rowGrids for row: " + row + " col: " + col);
+            else
+                StsException.systemDebug(this, "checkAddPatchGridToRowGrids", "patch " + patchID + " already exists for row: " + row + " col: " + col);
+        }
+    }
+
+    private void removePatchGridFromLists(StsPatchGrid patchGrid)
+    {
+        StsPatchGrid value;
+        int patchID = patchGrid.id;
+        boolean debug = StsPatchGrid.debugPatchID != -1 && patchID == StsPatchGrid.debugPatchID;
+        value = prevRowGrids.remove(patchID);
+        if(debug)
+        {
+            if(value != null)
+                StsException.systemDebug(this, "removePatchGridInGridList", "patch " + patchID + " removed from prevRowGrids for row: " + row);
+            else
+                StsException.systemDebug(this, "removePatchGridInGridList", "patch " + patchID + " doesn't exist in prevRowGrids for row: " + row);
+        }
+        value = rowGrids.remove(patchID);
+        if(debug)
+        {
+            if(value != null)
+                StsException.systemDebug(this, "removePatchGridInGridList", "patch " + patchID + " removed from rowGrids for row: " + row);
+            else
+                StsException.systemDebug(this, "removePatchGridInGridList", "patch " + patchID + " doesn't exist in rowGrids for row: " + row);
+        }
+    }
+
+    class TracePoints
+    {
+        byte pickType;
+        int row;
+        int col;
+        int slice;
+        StsPatchPoint[] tracePatchPoints = new StsPatchPoint[0];
+        int nTracePatchPoints;
+        // int centerOffset = 0;  // this is dif between centers for this trace and the master trace in slice increments
+        int centerPointIndex = -1; // index of the last correlated connection for this trace with master trace
+        // int indexAbove = 0;
+        // int indexBelow = 1;
+
+        TracePoints(int row, int col, float[] traceValues, byte pickType, int nSlices, int volSliceMin, int nVolSlices)
+        {
+            this.pickType = pickType;        // to match StsTraceUtilities.POINT...
+            this.row = row;
+            this.col = col;
+            float[] tracePoints = StsTraceUtilities.computeCubicInterpolatedPoints(traceValues, nInterpolationIntervals);
+            float z = zMin;
+            if(tracePoints == null) return;
+            nTracePatchPoints = tracePoints.length;
+            tracePatchPoints = new StsPatchPoint[nTracePatchPoints];
+            int i = 0;
+            for(int n = 0; n < nTracePatchPoints; n++, z += interpolatedZInc)
+            {
+                byte tracePointType = StsTraceUtilities.getPointType(tracePoints, n);
+                if(StsTraceUtilities.isMaxMinOrZero(tracePointType))
+                    tracePatchPoints[i++] = new StsPatchPoint(row, col, n, z, tracePoints[n], tracePointType);
+            }
+            nTracePatchPoints = i;
+            tracePatchPoints = (StsPatchPoint[])StsMath.trimArray(tracePatchPoints, nTracePatchPoints);
+        }
+
+        boolean matchesEndPointType(byte pointType, boolean windowEndIsZeroCrossing, byte endPointType)
+        {
+            if(windowEndIsZeroCrossing)
+                return pointType == StsTraceUtilities.POINT_PLUS_ZERO_CROSSING || pointType == StsTraceUtilities.POINT_MINUS_ZERO_CROSSING;
+            else
+                return pointType == endPointType;
+        }
+    }
+
+    class CorrelationWindow
+    {
+        TracePoints trace;
+        StsPatchPoint centerPoint;
+        int centerPointIndex;
+        StsPatchPoint pointAbove;
+        StsPatchPoint pointBelow;
+        int centerSlice;
+        int minSlice;
+        int maxSlice;
+        int dSliceMinus;
+        int dSlicePlus;
+        float stretchCorrelation;
+        byte centerPointType;
+        byte abovePointType;
+        byte belowPointType;
+        byte windowType;
+
+        CorrelationWindow(TracePoints trace, StsPatchPoint centerPoint, int centerPointIndex)
+        {
+            this.trace = trace;
+            this.centerPoint = centerPoint;
+            this.centerPointIndex = centerPointIndex;
+            this.centerSlice = centerPoint.slice;
+            centerPointType = centerPoint.pointType;
+            abovePointType = StsTraceUtilities.pointTypesBefore[centerPointType];
+            belowPointType = StsTraceUtilities.pointTypesAfter[centerPointType];
+        }
+
+        boolean initialize()
+        {
+            try
+            {
+                StsPatchPoint[] tracePatchPoints = trace.tracePatchPoints;
+                int nTracePatchPoints = tracePatchPoints.length;
+                if(centerPointIndex <= 0)
+                {
+                    if(nTracePatchPoints < 2) return false;
+                    windowType = WINDOW_BELOW;
+                    pointAbove = centerPoint;
+                    pointBelow = getTracePatchPointBelow();
+                    maxSlice = pointBelow.slice;
+                    dSlicePlus = maxSlice - centerSlice;
+                    dSliceMinus = dSlicePlus;
+                    minSlice = centerSlice - dSliceMinus;
+                }
+                else if(centerPointIndex == nTracePatchPoints - 1)
+                {
+                    if(nTracePatchPoints < 2) return false;
+                    windowType = WINDOW_ABOVE;
+                    pointBelow = centerPoint;
+                    pointAbove = getTracePatchPointAbove();
+                    minSlice = pointAbove.slice;
+                    dSliceMinus = centerSlice - minSlice;
+                    dSlicePlus = dSliceMinus;
+                    maxSlice = centerSlice + dSlicePlus;
+                }
+                else
+                {
+                    windowType = WINDOW_CENTERED;
+                    pointAbove = getTracePatchPointAbove();
+                    pointBelow = getTracePatchPointBelow();
+                    minSlice = pointAbove.slice;
+                    maxSlice = pointBelow.slice;
+                    dSliceMinus = centerSlice - minSlice;
+                    dSlicePlus = maxSlice - centerSlice;
+                }
+                return true;
+            }
+            catch(Exception e)
+            {
+                StsException.outputFatalException(this, "initialize", e);
+                return false;
+            }
+        }
+
+        private StsPatchPoint getTracePatchPointBelow()
+        {
+            StsPatchPoint[] tracePatchPoints = trace.tracePatchPoints;
+            int nTracePatchPoints = tracePatchPoints.length;
+
+            for(int index = centerPointIndex + 1; index < nTracePatchPoints; index++)
+                if(tracePatchPoints[index].pointType == belowPointType)
+                    return tracePatchPoints[index];
+            return tracePatchPoints[centerPointIndex + 1];
+        }
+
+        private StsPatchPoint getTracePatchPointAbove()
+        {
+            StsPatchPoint[] tracePatchPoints = trace.tracePatchPoints;
+
+            for(int index = centerPointIndex - 1; index >= 0; index--)
+                if(tracePatchPoints[index].pointType == abovePointType)
+                    return tracePatchPoints[index];
+            return tracePatchPoints[centerPointIndex - 1];
+        }
+        /**
+         * On the other trace, starting from the point following the last correlated point,
+         * find any and all picks of the center pick type on the other trace which match.
+         * check that the above and below pick types match as well
+         */
+        CorrelationWindow findMatchingWindows(TracePoints otherTrace, float stretchCorrelation)
+        {
+            int otherTraceCenterPointIndex = otherTrace.centerPointIndex + 1;
+            int nOtherTracePoints = otherTrace.nTracePatchPoints;
+            CorrelationWindow matchingWindow = null;
+            double bestCorrelation = 0.0;
+            int centerSlice = centerPoint.slice;
+            while(otherTraceCenterPointIndex < nOtherTracePoints)
+            {
+                StsPatchPoint otherTraceCenterPoint = otherTrace.tracePatchPoints[otherTraceCenterPointIndex];
+                int otherCenterSlice = otherTraceCenterPoint.slice;
+                if(otherCenterSlice > maxSlice) break;
+                if(otherCenterSlice >= minSlice && centerPointType == otherTraceCenterPoint.pointType)
+                {
+                    CorrelationWindow otherWindow = checkCreateMatchingWindow(otherTrace, otherTraceCenterPoint, otherCenterSlice, otherTraceCenterPointIndex, centerSlice, stretchCorrelation);
+                    if(otherWindow != null && otherWindow.stretchCorrelation > bestCorrelation)
+                    {
+                        matchingWindow = otherWindow;
+                        bestCorrelation = matchingWindow.stretchCorrelation;
+                    }
+                }
+                otherTraceCenterPointIndex++;
+            }
+            return matchingWindow;
+        }
+
+        /**
+         * On the other trace, starting from the point following the last correlated point,
+         * find any and all picks of the center pick type on the other trace which match.
+         * check that the above and below pick types match as well
+         */
+        CorrelationWindow newFindMatchingWindows(TracePoints otherTrace, float stretchCorrelation)
+        {
+            // sliceIndex for centerPoint of this window for which we want to find a matchingWindow on otherTrace
+            int centerSlice = centerPoint.slice;
+            // sliceIndex for last event found on otherTrace (or zero); we will search up and down from here for matches
+            int otherTraceCenterPointIndex = otherTrace.centerPointIndex + 1;
+
+            // search down otherTrace for event just below centerSlice of this window
+            while (otherTraceCenterPointIndex < otherTrace.nTracePatchPoints)
+            {
+                StsPatchPoint otherTraceCenterPoint = otherTrace.tracePatchPoints[otherTraceCenterPointIndex];
+                if (otherTraceCenterPoint.slice > centerSlice)
+                    return findMatchingWindows(otherTrace, otherTraceCenterPointIndex, stretchCorrelation);
+                otherTraceCenterPointIndex++;
+            }
+            return null;
+        }
+
+        /**
+         *
+         * @param otherTrace the trace on which we want to find matching windows
+         * @param otherTraceCenterPointStartIndex index in otherTrace where we will start the search
+         * @param stretchCorrelation minimum value used in matching windows @see matches()
+         * @return best correlation window or null if none
+         */
+        CorrelationWindow findMatchingWindows(TracePoints otherTrace, int otherTraceCenterPointStartIndex, float stretchCorrelation)
+        {
+            // this is sliceIndex for centerPoint of this window for which we want to find a matchingWindow on otherTrace
+            int centerSlice = centerPoint.slice;
+            // otherTrace point closest to this centerPoint where we start our search for matches
+            StsPatchPoint otherTraceCenterPoint = otherTrace.tracePatchPoints[otherTraceCenterPointStartIndex];
+            // this is sliceIndex for last event found on otherTrace (or zero); we will search up and down from here for matches
+            int otherTraceCenterPointLastIndex = otherTrace.centerPointIndex + 1;
+            // search down otherTrace for event just below centerSlice of this window
+            int nOtherTracePoints = otherTrace.nTracePatchPoints;
+
+            CorrelationWindow matchingWindow = null; // this will be best matching window in otherTrace
+            double bestCorrelation = 0.0; // this will be correlation between best otherTraceWindow and traceWindow
+            CorrelationWindow otherWindow; // possible matchingWindow to check for best match
+
+            int otherCenterSlice = otherTraceCenterPoint.slice;
+            // otherCenterSlice is just below centerSlice; if the pointType matches, try a correlation
+            if (otherTraceCenterPoint.pointType == centerPointType)
+            {
+                otherWindow = checkCreateMatchingWindow(otherTrace, otherTraceCenterPoint, otherCenterSlice, otherTraceCenterPointStartIndex, centerSlice, stretchCorrelation);
+                if (otherWindow != null && otherWindow.stretchCorrelation > bestCorrelation)
+                {
+                    matchingWindow = otherWindow;
+                    bestCorrelation = matchingWindow.stretchCorrelation;
+                }
+
+            }
+            // if the point just below centerSlice doesn't have same patchType, check the point just above (as long as it is still below the last correlated event index
+            else if (otherTraceCenterPointStartIndex > otherTraceCenterPointLastIndex)
+            {
+                StsPatchPoint nextOtherTraceCenterPoint = otherTrace.tracePatchPoints[otherTraceCenterPointStartIndex - 1];
+                if (nextOtherTraceCenterPoint.pointType == centerPointType)
+                {
+                    otherTraceCenterPointStartIndex--;
+                    otherTraceCenterPoint = nextOtherTraceCenterPoint;
+                    // we have a pointType match just below, so try to match it
+                    otherWindow = checkCreateMatchingWindow(otherTrace, otherTraceCenterPoint, otherCenterSlice, otherTraceCenterPointStartIndex, centerSlice, stretchCorrelation);
+                    if (otherWindow != null && otherWindow.stretchCorrelation > bestCorrelation)
+                    {
+                        matchingWindow = otherWindow;
+                        bestCorrelation = matchingWindow.stretchCorrelation;
+                    }
+                }
+            }
+            int nextOtherTraceCenterPointIndex;
+            // now search up for a match, but don't go past an event which is already correlated
+            for (nextOtherTraceCenterPointIndex = otherTraceCenterPointStartIndex - 1; nextOtherTraceCenterPointIndex > 0; nextOtherTraceCenterPointIndex--)
+            {
+                otherTraceCenterPoint = otherTrace.tracePatchPoints[nextOtherTraceCenterPointIndex];
+                otherCenterSlice = otherTraceCenterPoint.slice;
+                if (centerPointType == otherTraceCenterPoint.pointType)
+                {
+                    otherWindow = checkCreateMatchingWindow(otherTrace, otherTraceCenterPoint, otherCenterSlice, nextOtherTraceCenterPointIndex, centerSlice, stretchCorrelation);
+                    if (otherWindow != null && otherWindow.stretchCorrelation > bestCorrelation)
+                    {
+                        matchingWindow = otherWindow;
+                        bestCorrelation = matchingWindow.stretchCorrelation;
+                    }
+                    break;
+                }
+            }
+            // now search down for a match, but don't go past an event which is already correlated
+            for (nextOtherTraceCenterPointIndex = otherTraceCenterPointStartIndex + 1; nextOtherTraceCenterPointIndex < nOtherTracePoints; nextOtherTraceCenterPointIndex++)
+            {
+                otherTraceCenterPoint = otherTrace.tracePatchPoints[nextOtherTraceCenterPointIndex];
+                if (otherTraceCenterPoint.getPatchGrid() != null) break;
+                otherCenterSlice = otherTraceCenterPoint.slice;
+                if (centerPointType == otherTraceCenterPoint.pointType)
+                {
+                    otherWindow = checkCreateMatchingWindow(otherTrace, otherTraceCenterPoint, otherCenterSlice, nextOtherTraceCenterPointIndex, centerSlice, stretchCorrelation);
+                    if (otherWindow != null && otherWindow.stretchCorrelation > bestCorrelation)
+                    {
+                        matchingWindow = otherWindow;
+                        bestCorrelation = matchingWindow.stretchCorrelation;
+                    }
+                    break;
+                }
+            }
+            return matchingWindow;
+        }
+
+        CorrelationWindow checkCreateMatchingWindow(TracePoints otherTrace, StsPatchPoint otherTraceCenterPoint, int otherCenterSlice, int otherTraceCenterPointIndex, int centerSlice, float stretchCorrelation)
+        {
+            CorrelationWindow otherWindow = new CorrelationWindow(otherTrace, otherTraceCenterPoint, otherTraceCenterPointIndex);
+            if(!otherWindow.initialize()) return null;
+            if(otherWindow.isZCenterOutsideWindow(centerSlice) || !matches(otherWindow, stretchCorrelation))
+                return null;
+            else
+                return otherWindow;
+        }
+
+        /** check the various correlation measures and return the otherWindow if it matches; otherwise return null */
+        boolean matches(CorrelationWindow otherWindow, float stretchCorrelation)
+        {
+            if(otherWindow.windowType != windowType) return false;
+            if(otherWindow.pointAbove.pointType != pointAbove.pointType) return false;
+            if(otherWindow.pointBelow.pointType != pointBelow.pointType) return false;
+            // check correlation stretch
+            float minusStretchFactor = 1.0f;
+            float plusStretchFactor = 1.0f;
+            if(windowType != WINDOW_BELOW)
+            {
+                float dzMinusOtherScalar = ((float)dSliceMinus) / otherWindow.dSliceMinus;
+                minusStretchFactor = dzMinusOtherScalar;
+                if(minusStretchFactor > 1.0f)
+                    minusStretchFactor = 1 / minusStretchFactor;
+            }
+            else if(windowType != WINDOW_ABOVE)
+            {
+                float dzPlusOtherScalar = ((float)dSlicePlus) / otherWindow.dSlicePlus;
+                plusStretchFactor = dzPlusOtherScalar;
+                if(plusStretchFactor > 1.0f)
+                    plusStretchFactor = 1 / plusStretchFactor;
+            }
+            float stretchFactor = Math.min(minusStretchFactor, plusStretchFactor);
+            otherWindow.stretchCorrelation = stretchFactor;
+            return stretchFactor >= stretchCorrelation;
+        }
+
+        boolean isZCenterOutsideWindow(int centerSlice)
+        {
+            return centerSlice < minSlice || centerSlice > maxSlice;
+        }
     }
 
     public boolean initialize(StsModel model)
@@ -259,97 +909,21 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
         return;
     }
 
-    public void constructPatchVolume(StsPatchPickPanel pickPanel)
+    private void initializeLists()
     {
-        StsProgressBar progressPanel = pickPanel.progressBar;
-        windowSize = pickPanel.corWavelength;
-        pickDifWavelengths = pickPanel.maxPickDif;
-        float minAmpFraction = pickPanel.minAmpFraction;
-        float maxStretch = pickPanel.maxStretch;
-        pickType = pickPanel.pickType;
-        nPatchPointsMin = pickPanel.minPatchSize;
-        isIterative = pickPanel.isIterative;
-        autoCorMax = pickPanel.autoCorMax;
-        autoCorMin = pickPanel.autoCorMin;
-        autoCorInc = pickPanel.autoCorInc;
-        manualCorMin = pickPanel.manualCorMin;
-        gridList = new ArrayList<StsPatchGrid>(100);
-        rowGrids = new HashMap<Integer, StsPatchGrid>();
-        prevRowGrids = null;
+        gridList = new ArrayList<>(100);
+        rowGrids = new HashMap<>();
+        rowGridsIterator = rowGrids.values().iterator();
+        prevRowGrids = new HashMap<>(); // not used on first row
+    }
 
-        if(!isIterative)
-        {
-            nIterations = 1;
-            stretchCorrelations = new float[]{manualCorMin};
-        }
-        else
-        {
-            nIterations = StsMath.ceiling(1 + (autoCorMax - autoCorMin) / autoCorInc);
-            stretchCorrelations = new float[nIterations];
-            float stretchCorrelation = autoCorMax;
-            for(int n = 0; n < nIterations; n++, stretchCorrelation -= autoCorInc)
-                stretchCorrelations[n] = stretchCorrelation;
-        }
-
-        rowSortedPatchGrids = new StsPatchGrid[0];
-        colSortedPatchGrids = null;
-        initialize();
-        StsPatchGrid.staticInitialize(seismicVolume.nRows, seismicVolume.nCols);
-
-        if(progressPanel != null)
-            progressPanel.initialize(croppedBoundingBox.nRows);
-
-        TracePoints[] rowTracePoints = null; //new TracePoints[nCols];
-        float absSeismicDataMax = Math.min(Math.abs(seismicVolume.dataMin), Math.abs(seismicVolume.dataMax));
-        minDataAmplitude = minAmpFraction * absSeismicDataMax;
-        initializeParameters();
-        initializeToBoundingBox(croppedBoundingBox);
-        initializeSliceInterpolation();
-
-        int croppedRowMin = croppedBoundingBox.rowMin;
-        int croppedColMin = croppedBoundingBox.colMin;
-        int croppedSliceMin = croppedBoundingBox.sliceMin;
-        int nCroppedSlices = croppedBoundingBox.sliceMax - croppedSliceMin;
-        int volRow = croppedRowMin;
-        int nVolSlices = seismicVolume.nSlices;
-        float[] traceValues = new float[nVolSlices];
-        for(row = 0; row < nRows; row++, volRow++)
-        {
-            //statusArea.setProgress(row*40.f/nRows);
-            TracePoints[] prevRowTracePoints = rowTracePoints;
-            rowTracePoints = new TracePoints[nCols];
-            TracePoints prevTracePoints = null;
-            prevRowGrids = rowGrids;
-            rowGrids = new HashMap<>();
-            FloatBuffer rowFloatBuffer = seismicVolume.getRowPlaneFloatBuffer(volRow, croppedColMin);
-            if(rowFloatBuffer == null) return;
-            // if(croppedColMin > 0) rowFloatBuffer.position(croppedColMin * nVolSlices);
-            int volCol = croppedColMin;
-            for(int col = 0; col < nCols; col++, volCol++)
-            {
-                rowFloatBuffer.position(col*nSlices + croppedSliceMin);
-                rowFloatBuffer.get(traceValues);
-
-                TracePoints tracePoints = new TracePoints(row, col, traceValues, pickType, nSlices, croppedSliceMin, nVolSlices);
-                rowTracePoints[col] = tracePoints;
-                //checkAddTracePatches(tracePoints, prevRowTracePoints[col], prevTracePoints);
-                addTracePatches(tracePoints, prevTracePoints, prevRowTracePoints);
-                prevTracePoints = tracePoints;
-            }
-            processPrevRowGrids(row);
-            if(progressPanel == null) continue;
-            if(progressPanel.isCanceled())
-            {
-                progressPanel.setDescriptionAndLevel("Cancelled by user.", StsProgressBar.ERROR);
-                return;
-            }
-            progressPanel.setValue(row + 1);
-
-        }
-        addGridSet(rowGrids);
-        finish();
-        getPatchVolumeClass().setDisplayCurvature(true);
-        progressPanel.finished();
+    private void incrementLists()
+    {
+        prevRowGrids = rowGrids;
+        prevRowGridsIterator = rowGridsIterator;
+        clearPrevRowGridsAddedFlags();
+        rowGrids = new HashMap<>();
+        rowGridsIterator = rowGrids.values().iterator();
     }
 
     private void initializeParameters()
@@ -386,74 +960,11 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
         }
     }
 
-    private void addTracePatches(TracePoints trace, TracePoints prevColTrace, TracePoints[] prevRowTraces)
+    private void initializeTraceIndices(TracePoints trace, TracePoints prevRowTrace, TracePoints prevColTrace)
     {
-        StsPatchPoint[] newPatchPoints = trace.tracePatchPoints;
-        int nNewPatchPoints = newPatchPoints.length;
-        if(nNewPatchPoints == 0) return;
-
-        ArrayList<TracePoints> otherTraces = getOtherTraces(trace, prevColTrace, prevRowTraces);
-        int nOtherTraces = otherTraces.size();
-        if(nOtherTraces == 0) return;
-        // For each patchPoint, check previous traces for points which are same type and just above or below this new point
-        // and find which of these two possible prev trace points has the best correlation.
-        // If this correlation is above the minCorrelation, add this new point to the prev point patch.
-        // If the new point already has a patch (because it correlated with one of the other of the 4 otherTraces, then the addPatchPointToPatch
-        // will merge the two patches.
-        for(int i = 0; i < nIterations; i++)
-        {
-            initializeTraceIndices(trace, otherTraces);
-            float minStretchCorrelation = stretchCorrelations[i];
-            for(int centerPointIndex = 0; centerPointIndex < nNewPatchPoints; centerPointIndex++)
-            {
-                StsPatchPoint centerPoint = newPatchPoints[centerPointIndex];
-                if(centerPoint.patchID != -1) continue;
-                CorrelationWindow window;
-                window = new CorrelationWindow(trace, centerPoint, centerPointIndex);
-                if(!window.initialize()) continue;
-                int centerSlice = centerPoint.slice;
-                //iterate through adjacent traces & find best patch (if exists)
-                StsPatchConnection[] connections = new StsPatchConnection[0];
-                for(TracePoints otherTrace : otherTraces)
-                {
-                    // int[] possibleMatchIndices = otherTrace.getPossibleEvents(z0, z1);
-                    CorrelationWindow matchingWindow = window.findMatchingWindows(otherTrace, minStretchCorrelation);
-                    if(matchingWindow == null) continue;
-                    StsPatchPoint otherCenterPoint = matchingWindow.centerPoint;
-
-                    double distance = Math.abs(otherCenterPoint.slice - centerSlice);
-                    StsPatchConnection connection = new StsPatchConnection(centerPoint, otherCenterPoint, matchingWindow.stretchCorrelation, distance);
-                    connections = (StsPatchConnection[])StsMath.arrayAddElement(connections, connection);
-                    otherTrace.centerPointIndex = matchingWindow.centerPointIndex;
-                    // otherTrace.centerOffset = otherTrace.centerPointIndex - centerPointIndex;
-                }
-                addConnections(centerPoint, connections);
-                // checkAddConnections(newPoint, newConnections);
-            }
-        }
-    }
-
-    private void checkForMultipleConnections(StsPatchConnection connection, StsPatchConnection[] newConnections)
-    {
-        if(newConnections.length == 0) return;
-
-    }
-
-    private void initializeTraceIndices(TracePoints prevColTrace, ArrayList<TracePoints> otherTraces)
-    {
-        if(prevColTrace != null)
-            prevColTrace.centerPointIndex = -1;
-        if(otherTraces == null) return;
-        for(TracePoints otherTrace : otherTraces)
-            if(otherTrace != null) otherTrace.centerPointIndex = -1;
-    }
-
-    void addConnections(StsPatchPoint newPoint, StsPatchConnection[] newConnections)
-    {
-        int nNewConnections = newConnections.length;
-        if(nNewConnections == 0) return;
-        for(StsPatchConnection connection : newConnections)
-            addPatchConnection(connection);
+        if(trace != null) trace.centerPointIndex = -1;
+        if(prevRowTrace != null) prevRowTrace.centerPointIndex = -1;
+        if(prevColTrace != null) prevColTrace.centerPointIndex = -1;
     }
 
     public StsPatchVolumeClass getPatchVolumeClass()
@@ -461,17 +972,6 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
         if(patchVolumeClass != null) return patchVolumeClass;
         patchVolumeClass = (StsPatchVolumeClass)getCreateStsClass();
         return patchVolumeClass;
-    }
-
-    void addPatchConnections(StsPatchConnection[] newConnections)
-    {
-        for(StsPatchConnection connection : newConnections)
-            addPatchConnection(connection);
-    }
-
-    boolean valueOK(double v)
-    {
-        return Math.abs(v) >= minDataAmplitude;
     }
 
     private void finish()
@@ -482,9 +982,9 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
         int nGrids = gridList.size();
         rowSortedPatchGrids = new StsPatchGrid[nGrids];
         gridList.toArray(rowSortedPatchGrids);
-        debugCheckEmptyFraction(rowSortedPatchGrids);
+        // debugCheckEmptyFraction(rowSortedPatchGrids);
         StsException.systemDebug(this, "finish", " Number of parent grids: " + nParentGrids + "Number of child grids: " + nGrids + " too small: " + nSmallGridsRemoved);
-        StsException.systemDebug(this, "finish", "max grid dimension: " + StsPatchGrid.maxGridSize);
+        // StsException.systemDebug(this, "finish", "max grid dimension: " + StsPatchGrid.maxGridSize);
 
         StsPatchGrid.sortRowFirst = true;
         Arrays.sort(rowSortedPatchGrids);
@@ -500,13 +1000,16 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
         String newname = seismicName + ".patchVolume" + (num + 1);
         setName(newname);
         clearConstructionArrays();
-        if(!isPersistent()) addToModel();
+        if(!isPersistent())
+        {
+            currentModel.getDatabase().blockTransactions();
+            addToModel();
+            currentModel.getDatabase().saveTransactions();
+        }
         getPatchVolumeClass().setIsVisible(true);
         setIsVisible(true);
-        if(StsPatchGrid.nOverlappedPoints > 0) StsException.systemError("Error: number of overlapping points for all grids > 0: " + StsPatchGrid.nOverlappedPoints);
-        if(StsPatchGrid.debug) StsPatchGrid.printOverlapPoints();
     }
-
+/*
     private void debugCheckEmptyFraction(StsPatchGrid[] grids)
     {
         float nTotal = 0;
@@ -525,7 +1028,7 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
         float fractionActualUsed = nActualUsed/nTotal;
         StsException.systemDebug(this, "debugCheckEmptyFraction", "Fraction used: " + fractionUsed + "Fraction actualUsed: " + fractionActualUsed);
     }
-
+*/
     private void clearConstructionArrays()
     {
         gridList = null;
@@ -559,11 +1062,6 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
         return rowSortedPatchGrids != null;
     }
 
-    void addGrid(StsPatchGrid patchGrid)
-    {
-        gridList.add(patchGrid);
-    }
-
     StsPatchGrid getGrid(int target)
     {
         int number = gridList.size();
@@ -583,19 +1081,31 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
             return gridList.get(low);
     }
 
-    /** Called for the last row only; unconditionally add these grids to volume unless they are too small. */
-    void addGridSet(HashMap<Integer, StsPatchGrid> gridSetHashMap)
+    private void clearPrevRowGridsAddedFlags()
     {
-        StsPatchGrid[] patchGrids = gridSetHashMap.values().toArray(new StsPatchGrid[0]);
+        Iterator<StsPatchGrid> prevRowGridIterator = prevRowGrids.values().iterator();
+        while(prevRowGridIterator.hasNext())
+        {
+            StsPatchGrid patchGrid = prevRowGridIterator.next();
+            patchGrid.rowGridAdded = false;
+        }
+    }
+
+    /** Called for the last row only; unconditionally add all rowGrids unless they are too small. */
+    void addRemainingGrids()
+    {
+        StsPatchGrid[] patchGrids = rowGrids.values().toArray(new StsPatchGrid[0]);
         for(int  n = 0; n < patchGrids.length; n++)
         {
             StsPatchGrid patchGrid = patchGrids[n];
-            patchGrid.initializeGrid();
             if(!patchGrid.isTooSmall(nPatchPointsMin))
-                patchGrid.constructGridArray(gridList);
+            {
+                patchGrid.finish();
+                gridList.add(patchGrid);
+            }
         }
         if(StsPatchVolume.debug)
-            StsException.systemDebug(this, "addToGrids", "added " + patchGrids.length + " grids from the last row.");
+            StsException.systemDebug(this, "addRemainingGrids", "added " + patchGrids.length + " grids remaining.");
     }
 
     public void setCroppedBoundingBox(StsCroppedBoundingBox croppedBoundingBox)
@@ -715,7 +1225,7 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
     {
         for(StsPatchGrid patch : rowSortedPatchGrids)
         {
-            if(patch == null) patch.clear();
+            if(patch != null) patch.clear();
         }
     }
 
@@ -750,164 +1260,6 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
         otherTraces.add(otherTrace);
     }
 
-    //if(debug) StsException.systemDebug(this, "addCorrelatedTracePatches", "Cor: " + bestCor + " with " + minDistance + " distance");
-
-    // Would avoid an iterator if iterator is simple; here instead use: for(PatchCheck patchCheck : possiblePatches) instead/  TJL 5/23/09
-    // Loop below doesn't eliminate two previous traces who disagree on which patch new event should connect to.
-    // I suspect a "cracked" patch is very common as we discussed and we need to handle accordingly.
-    // There are countless possibilities here, so we need to be very shrewd in selecting the one we think is optimal.
-    // I think our distance rejection should be based on wavelength.  As we have discussed, if we are chasing a max,
-    // the only possible candidates on previous traces would be the one above and the one below.  If our new trace event
-    // is exactly between 2 maxes on the prevTrace, then the distance would be 90 degrees.  I think this is being generous
-    // and in practice we might find 30 to 45 to be a better range. Regardless, it would be user definable.
-    // When examining the 4 previous traces, if the traces that have a candidate all agree that it's the same patch we can
-    // then move to the correlation calculation.  As long as one prevTrace passes the correlation test, we should add the new
-    // event to this patch.  If the previous traces don't agree on the patch, then we apply the correlation test.  If the ones
-    // that pass still don't agree on the patch we can merge the patches if they don't have any overlap.  It doesn't appear
-    // that the algorithm currently would do any merging which I believe is an essential operation.
-    // If there is overlap,  we then pick the best one; I would opt for the closest since I think any that
-    // pass the correlation test are "equal" in that regard.
-    // In order to decide if two or more patches are mergeable, the StsPatchGrid should use a TreeMap for the patchPoint entries
-    // instead of an ArrayList.  The key would be the surface index: row*nCols + col.  For two patches, we need to run thru them
-    // using the two TreeMaps to determine if there is a common entry.  If there is, then they overlap and can't be merged.
-    // A more efficient structure for this would be a simplification of the StsEdgeLoopRadialLinkGrid class which uses row and col links to
-    // define a sparse collection of points on a regular grid.
-    // TJL 6/23/09
-
-/*
-    private float computeCrossCorrelation(CorrelationWindow newWindow, CorrelationWindow otherWindow, byte pointType)
-    {
-        if(newWindow == null || otherWindow == null) return 0.0f;
-
-        TracePoints traceNew = newWindow.trace;
-        int centerNew = newWindow.centerSlice;
-        int minNew = newWindow.minSlice;
-        int maxNew = newWindow.maxSlice;
-
-        TracePoints traceOther = otherWindow.trace;
-        int centerOther = otherWindow.centerSlice;
-        int minOther = otherWindow.minSlice;
-        int maxOther = otherWindow.maxSlice;
-
-        int nPointsNew = maxNew - minNew + 1;
-        StsPatchPoint[] tracePointsNew = traceNew.tracePatchPoints;
-        int nTracePointsNew = tracePointsNew.length;
-        int[] centersNew = new int[nPointsNew];
-        for(int n = minNew, i = 0; n <= maxNew; n++, i++)
-            centersNew[i] = tracePointsNew[n].slice;
-        int centerMinNew = centersNew[0];
-        int centerMaxNew = centersNew[nPointsNew - 1];
-
-        int nPointsOther = maxOther - minOther + 1;
-        StsPatchPoint[] tracePointsOther = traceOther.tracePatchPoints;
-        int nTracePointsOther = tracePointsOther.length;
-        int centerMinOther = tracePointsOther[minOther].slice;
-        int centerMaxOther = tracePointsOther[maxOther].slice;
-
-        int[] centerPointsOther = new int[nPointsOther];
-        for(int n = minOther, i = 0; n <= maxOther; n++, i++)
-            centerPointsOther[i] = tracePointsOther[n].slice;
-        // translate and stretch/shrink pointsOther z values so they line up with pointsNew
-
-        int dzMinusOther = centerOther - centerMinOther;
-        int dzMinusNew = centerNew - centerMinNew;
-        float dzMinusOtherScalar = (float)dzMinusNew / dzMinusOther;
-
-        int dzPlusOther = centerMaxOther - centerOther;
-        int dzPlusNew = centerMaxNew - centerNew;
-        double dzPlusOtherScalar = (float)dzPlusNew / dzPlusOther;
-
-        for(int i = 0; i < nPointsOther; i++)
-        {
-            centerOther = centerPointsOther[i];
-            double dz = zOther - centerOther;
-            if(dz < 0.0)
-                pointsOther[i][0] = centerNew + dz * dzMinusOtherScalar;
-            else
-                pointsOther[i][0] = centerNew + dz * dzPlusOtherScalar;
-        }
-        int startIndex = minNew;
-        double[][] interpolatedNewPoints = new double[nPointsOther][];
-        CorrelationPointPair[] otherPointPairs = new CorrelationPointPair[nPointsOther];
-        for(int n = 0; n < nPointsOther; n++)
-        {
-            double zOther = pointsOther[n][0];
-            double[] point = new double[]{zOther, 0, 0};
-            double[] pointNextNew = tracePointsNew[startIndex].point;
-            while(startIndex < nTracePointsNew - 1)
-            {
-                double[] pointPrevNew = pointNextNew;
-                pointNextNew = tracePointsNew[startIndex + 1].point;
-
-                if(zOther <= pointNextNew[0])
-                {
-                    point = StsTraceUtilities.interpolateCubicValueAndSlope(pointPrevNew, pointNextNew, zOther, zInc);
-                    break;
-                }
-                startIndex++;
-            }
-            otherPointPairs[n] = new CorrelationPointPair(point, pointsOther[n]);
-        }
-        startIndex = minOther;
-        double[][] interpolatedOtherPoints = new double[nPointsNew][];
-        CorrelationPointPair[] newPointPairs = new CorrelationPointPair[nPointsNew];
-        for(int n = 0; n < nPointsNew; n++)
-        {
-            double zNew = pointsNew[n][0];
-            double dzNew = zNew - zCenterNew;
-            double zOther;
-            if(dzNew < 0.0)
-                zOther = zCenterOther + dzNew / dzMinusOtherScalar;
-            else
-                zOther = zCenterOther + dzNew / dzPlusOtherScalar;
-            double[] point = new double[]{zNew, 0, 0};
-            double[] pointNextOther = tracePointsOther[startIndex].point;
-            while(startIndex < nTracePointsOther - 1)
-            {
-                double[] pointPrevOther = pointNextOther;
-                pointNextOther = tracePointsOther[startIndex + 1].point;
-                if(zOther <= pointNextOther[0])
-                {
-                    point = StsTraceUtilities.interpolateCubicValueAndSlope(pointPrevOther, pointNextOther, zOther, zInc);
-                    break;
-                }
-                startIndex++;
-            }
-            newPointPairs[n] = new CorrelationPointPair(pointsNew[n], point);
-        }
-        // first, center, and last otherPointPairs are repeats of first, center, and last newPointPairs, so remove them
-        CorrelationPointPair[] newOtherPointPairs = new CorrelationPointPair[nPointsOther - 3];
-        int windowCenterOther = centerOther - minOther;
-        int nMinusPoints = windowCenterOther - 1;
-        int nPlusPoints = maxOther - centerOther - 1;
-        System.arraycopy(otherPointPairs, 1, newOtherPointPairs, 0, nMinusPoints);
-        System.arraycopy(otherPointPairs, windowCenterOther + 1, newOtherPointPairs, nMinusPoints, nPlusPoints);
-        otherPointPairs = newOtherPointPairs;
-        CorrelationPointPair[] pointPairs = (CorrelationPointPair[])StsMath.arrayAddArray(newPointPairs, otherPointPairs);
-        Arrays.sort(pointPairs);
-
-        int nTotalValues = pointPairs.length;
-        double valueNew;
-        double valueOther;
-        double dz;
-        double cor = 0;
-        double newCovar = 0;
-        double otherCovar = 0;
-
-        for(int n = 1; n < nTotalValues; n++)
-        {
-            dz = pointPairs[n].z - pointPairs[n - 1].z;
-            valueNew = dz * (pointPairs[n - 1].newValue + pointPairs[n].newValue) / 2;
-            valueOther = dz * (pointPairs[n - 1].otherValue + pointPairs[n].otherValue) / 2;
-
-            cor += valueNew * valueOther;
-            newCovar += valueNew * valueNew;
-            otherCovar += valueOther * valueOther;
-        }
-        cor /= Math.sqrt(newCovar * otherCovar);
-        return (float)cor;
-    }
-*/
     private float computeStretchCorrelation(CorrelationWindow newWindow, CorrelationWindow otherWindow)
     {
         if(newWindow == null || otherWindow == null) return 0.0f;
@@ -942,602 +1294,63 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
         if(plusStretchFactor > 1.0f)
             plusStretchFactor = 1 / plusStretchFactor;
 
-        return (float)Math.min(minusStretchFactor, plusStretchFactor);
+        return Math.min(minusStretchFactor, plusStretchFactor);
     }
 
-    class CorrelationPointPair implements Comparable<CorrelationPointPair>
-    {
-        double z;
-        double newValue, otherValue;
-
-        CorrelationPointPair(double[] pointNew, double[] pointOther)
-        {
-            z = pointNew[0];
-            newValue = pointNew[1];
-            otherValue = pointOther[1];
-        }
-
-        public int compareTo(CorrelationPointPair other)
-        {
-            double otherZ = other.z;
-            if(z < otherZ)
-                return -1;
-            else if(z > otherZ)
-                return 1;
-            else
-                return 0;
-        }
-    }
-/*
-    private double getTraceInterpolatedValue(StsPatchPoint[] patchPoints, double z, int startIndex)
-    {
-        int nPoints = patchPoints.length;
-        while(startIndex < nPoints - 1)
-        {
-            if(patchPoints[startIndex].point[0] <= z)
-                return StsTraceUtilities.interpolateCubic(patchPoints[startIndex].point, patchPoints[startIndex + 1].point, z, zInc);
-            startIndex++;
-        }
-        return StsParameters.doubleNullValue;
-    }
-*/
-/*
-    private int[] getOtherCorrelationWindowPoints(TracePoints otherTrace, int nOtherPatchIndex, double zMin, double zMax)
-    {
-        StsPatchPoint otherPatchPoint = otherTrace.tracePickTypePoints[nOtherPatchIndex];
-        byte pointType = otherPatchPoint.pointType;
-        int traceIndex = otherPatchPoint.traceIndex;
-        StsPatchPoint[] tracePatchPoints = otherTrace.tracePatchPoints;
-        int nPoints = tracePatchPoints.length;
-        int firstTraceIndex = traceIndex;
-        StsPatchPoint patchPoint = otherPatchPoint;
-        while(firstTraceIndex > 0 && zMin <= tracePatchPoints[firstTraceIndex-1].point[0])
-            firstTraceIndex--;
-
-        int lastTraceIndex = firstTraceIndex;
-        while(lastTraceIndex < nPoints-1 && zMax >= tracePatchPoints[lastTraceIndex+1].point[0])
-            lastTraceIndex++;
-
-        return new int[] { firstTraceIndex, lastTraceIndex };
-    }
-*/
-
-    /**
-     * Given a newPatchPoint at newRow-newCol, which correlates with a prevPatchPoint at prevRow-prevCol which is possibly part of a patchGrid in the prevPatchGridsSet,
-     * combine these two points in the same patch.  The prevPatchPoint may be on the previous col (same row), or previous row (same col).
-     * If the previousPatchPoint is not part of an existing patchGrid (prevID == -1), then we will create a new patchGrid and add both points to it.
-     * If the previousPatchPoint is part of a patchGrid we will add the newPatchPoint to this patchGrid, unless the newPatchPoint already belongs to another patchGrid
-     * (this occurs when we first correlate with the previous column and find one patchGrid and also correlate with the previous row and find a different patchGrid).
-     */
-    private void addPatchConnection(StsPatchConnection connection)
-    {
-        StsPatchPoint newPatchPoint = connection.newPoint;
-        StsPatchPoint prevPatchPoint = connection.otherPoint;
-
-        StsPatchGrid patchGrid;
-
-        int prevID = prevPatchPoint.patchID;
-        int id = newPatchPoint.patchID;
-        if(id == -1)
-        {
-            if(prevID == -1) // prevPatchGrid doesn't exist, so create it
-            {
-                patchGrid = StsPatchGrid.construct(this, newPatchPoint.pointType);
-            }
-            else // prevPatchGrid does exist, so get it
-            {
-                patchGrid = getPatchGrid(prevID, prevPatchPoint);
-                if(patchGrid == null) return;
-            }
-            // add points and connection to this patchGrid
-            patchGrid.addInitialPatchConnection(connection);
-            // this patchGrid may or may not have already been added; add it, HashMap won't allow value with same key
-            putPatchGridInRowList(patchGrid);
-
-            // add newPatchPoint to prevPatchGrid
-            // this might be replacing an existing patchGrid in rowGrids with the same one
-        }
-        else // id != -1 means this point was just added to a patch from prev row and the patchGrid would have been added to the rowGrids array
-        {
-            if(prevID == -1) // the prevPatchPoint from the prev col (same row) is not assigned to a patch; assign it to this one
-            {
-                patchGrid = getPatchGrid(id, newPatchPoint);
-                if(patchGrid == null) return; // patchGrid not found; systemDebugError was printed
-                patchGrid.addInitialPatchConnection(connection);
-            }
-            else if(prevID == id) // prevPatchPoint on prev row (same col) is already assigned to the same patch: add this connection
-            {
-                patchGrid = getPatchGrid(id, newPatchPoint);
-                if(patchGrid == null) return; // patchGrid not found; systemDebugError was printed
-                patchGrid.addInitialPatchConnection(connection);
-            }
-
-            else // prevPoint and this point belong to different patches: merge newPatchGrid into prevPatchGrid and add connection
-            {
-                StsPatchGrid prevPatchGrid = getPatchGrid(prevID, prevPatchPoint);
-                if(prevPatchGrid == null) return;
-                StsPatchGrid newPatchGrid = getPatchGrid(id, newPatchPoint);
-                if(newPatchGrid == null) return;
-                mergePatchGrid(prevPatchGrid, newPatchGrid, connection);
-            }
-        }
-    }
-
-    private void mergePatchGrid(StsPatchGrid patchGrid, StsPatchGrid mergedPatchGrid, StsPatchConnection newConnection)
-    {
-        // just to keep numbering compact, merge larger id grid into smaller id (generally the newPatchGrid into the prevPatchGrid)
-        if(mergedPatchGrid.id < patchGrid.id)
-        {
-            mergePatchGrid(mergedPatchGrid, patchGrid, newConnection);
-            return;
-        }
-        patchGrid.mergePatchGrid(mergedPatchGrid, newConnection);
-        removePatchGridFromRowList(mergedPatchGrid);
-        putPatchGridInRowList(patchGrid);
-    }
-
-
-    private void putPatchGridInRowList(StsPatchGrid patchGrid)
-    {
-        int patchID = patchGrid.id;
-        if(StsPatchGrid.debugPatchID != -1 && patchID == StsPatchGrid.debugPatchID)
-            StsException.systemDebug(this, "putPatchGridInGridList", "patch " + patchID + " added to rowGridsHashMap for row: " + row);
-        rowGrids.put(patchID, patchGrid);
-    }
-
-    private void removePatchGridFromRowList(StsPatchGrid patchGrid)
-    {
-        int patchID = patchGrid.id;
-        if(StsPatchGrid.debugPatchID != -1 && patchID == StsPatchGrid.debugPatchID)
-            StsException.systemDebug(this, "removePatchGridInGridList", "patch " + patchID + " removed from rowGridsHashMap for row: " + row);
-
-        StsPatchGrid removedPatchGrid;
-        removedPatchGrid = rowGrids.remove(patchID);
-//        if(removedPatchGrid == null || removedPatchGrid  != patchGrid)
-//            StsException.systemError(this, "removePatchGridFromRowList", "Failed to find patchGrid " + patchID + " to remove from rowGrids");
-        removedPatchGrid = prevRowGrids.remove(patchID);
-        // if(removedPatchGrid == null || removedPatchGrid  != patchGrid)
-        //    StsException.systemError(this, "removePatchGridFromRowList", "Failed to find patchGrid " + patchID + " to remove from prevRowGrids");
-    }
-
-    private StsPatchGrid getPatchGrid(StsPatchPoint patchPoint)
-    {
-        return getPatchGrid(patchPoint.patchID, patchPoint);
-    }
-
-    private StsPatchGrid getPatchGrid(int id, StsPatchPoint patchPoint)
+    private StsPatchGrid getPatchGrid(int id)
     {
         StsPatchGrid patchGrid = rowGrids.get(id);
+        // if patchGrid exists in rowGrids, then it has already been added there and deleted from prevRowGrids
         if(patchGrid != null)
         {
             if(StsPatchGrid.debugPatchID != -1 && (id == StsPatchGrid.debugPatchID))
-                StsException.systemDebug(this, "getPatchGrid", "patch grid " + id + " gotten from rowGridsHashMap.");
+                StsException.systemDebug(this, "getPatchGrid", "patch grid " + id +
+                        " gotten from rowGrids at row: " + row + " col: " + col);
             return patchGrid;
         }
-
-        if(prevRowGrids != null)
+        // if patchGrid is not in rowGrids, then add it there and delete it from prevRowGrids
+        else if(prevRowGrids != null)
         {
             patchGrid = prevRowGrids.get(id);
             if(patchGrid != null)
             {
+                rowGrids.put(id, patchGrid);
+                prevRowGrids.remove(id);
                 if(StsPatchGrid.debugPatchID != -1 && (id == StsPatchGrid.debugPatchID))
-                    StsException.systemDebug(this, "getPatchGrid", "patch grid " + id + " gotten from prevRowsGridsHashMap.");
+                    StsException.systemDebug(this, "getPatchGrid", "patch grid " + id +
+                            " gotten and deleted from prevRowsGrids and added to rowGrids at row: " + row + " col: " + col);
                 return patchGrid;
             }
         }
-        StsException.systemError(this, "getPatchGrid",  "Couldn't get patchGrid for id " + id +
-                " from patchPoint at row " + patchPoint.row + " col " + patchPoint.col);
+        StsException.systemError(this, "getPatchGrid",  "Couldn't get patchGrid for id " + id + " at row: " + " col: " + col);
         return null;
     }
 
     /**
      * This PatchGridSet is for the row before row just finished.
      * If a grid in this prev row is disconnected (doesn't have same patch in row just finished),
-     * then either delete it if it is a small point, or write it out (disconnected so we won't refer to it again).
-     * If not disconnected, add it to volume set.
+     * then either delete it if it is a small point, or add it to volume set.
      */
     void processPrevRowGrids(int row)
     {
+        if(row == 0) return;
         StsPatchGrid[] prevRowPatchGrids = prevRowGrids.values().toArray(new StsPatchGrid[0]);
-        //int nPrevRowGrids = prevRowPatchGrids.length;
         int nDisconnectedGrids = 0;
         for(StsPatchGrid patchGrid : prevRowPatchGrids)
         {
             boolean disconnected = patchGrid.isDisconnected(row);
             if(!disconnected) continue;
-            patchGrid.initializeGrid();
-            // if disconnected but too small, don't add
             if(patchGrid.isTooSmall(nPatchPointsMin))
-            {
                 nSmallGridsRemoved++;
-                continue;
-            }
             else
-                patchGrid.constructGridArray(gridList);
+            {
+                patchGrid.finish();
+                gridList.add(patchGrid);
+                nDisconnectedGrids++;
+            }
             prevRowGrids.remove(patchGrid.id);
-            nDisconnectedGrids++;
         }
-        if(debug) StsException.systemDebug(this, "processPrevRowGrids", "row: " + row + " added " + nDisconnectedGrids + " disconnected grids");
-    }
-
-    class TracePoints
-    {
-        byte pickType;
-        int row;
-        int col;
-        int slice;
-        StsPatchPoint[] tracePatchPoints = new StsPatchPoint[0];
-        int nTracePatchPoints;
-        // int centerOffset = 0;  // this is dif between centers for this trace and the master trace in slice increments
-        int centerPointIndex = -1; // index of the last correlated connection for this trace with master trace
-        // int indexAbove = 0;
-        // int indexBelow = 1;
-
-        TracePoints(int row, int col, float[] traceValues, byte pickType, int nSlices, int volSliceMin, int nVolSlices)
-        {
-            this.pickType = pickType;        // to match StsTraceUtilities.POINT...
-            this.row = row;
-            this.col = col;
-            float[] tracePoints = StsTraceUtilities.computeCubicInterpolatedPoints(traceValues, nInterpolationIntervals);
-            float z = zMin;
-            if(tracePoints == null) return;
-            nTracePatchPoints = tracePoints.length;
-            tracePatchPoints = new StsPatchPoint[nTracePatchPoints];
-            int i = 0;
-            for(int n = 0; n < nTracePatchPoints; n++, z += interpolatedZInc)
-            {
-                byte tracePointType = StsTraceUtilities.getPointType(tracePoints, n);
-                if(StsTraceUtilities.isMaxMinOrZero(tracePointType))
-                    tracePatchPoints[i++] = new StsPatchPoint(row, col, n, z, tracePoints[n], tracePointType);
-            }
-            nTracePatchPoints = i;
-            tracePatchPoints = (StsPatchPoint[])StsMath.trimArray(tracePatchPoints, nTracePatchPoints);
-        }
-/*
-        private int[] findNearestPicks(double pickZ, byte pickType)
-        {
-            boolean foundPickAbove = getPrevTracePoint(pickType, pickZ);
-            indexBelow = Math.min(indexAbove + 1, nTracePatchPoints - 1);
-            boolean foundPickBelow = getNextTracePoint(pickType, pickZ);
-            if(foundPickAbove && foundPickBelow)
-                return new int[]{indexAbove, indexBelow};
-            else if(foundPickAbove)
-                return new int[]{indexAbove};
-            else if(foundPickBelow)
-                return new int[]{indexBelow};
-            else
-                return null;
-        }
-*/
-        /*
-        private boolean getNextTracePoint(byte pickType, double pickZ)
-        {
-            int index = indexBelow;
-            StsPatchPoint tracePoint = tracePatchPoints[index];
-            // current z is above or at pickZ; increase increment until below pickZ;
-            // then search for first pickType match
-            if(tracePoint.point[0] <= pickZ)
-            {
-                while(tracePoint.point[0] <= pickZ)
-                {
-                    index++;
-                    if(index >= nTracePatchPoints) return false;
-                    tracePoint = tracePatchPoints[index];
-                }
-                while(true)
-                {
-                    if(tracePoint.pointType == pickType)
-                    {
-                        indexBelow = index;
-                        return true;
-                    }
-                    index++;
-                    if(index >= nTracePatchPoints) return false;
-                    tracePoint = tracePatchPoints[index];
-                }
-            }
-            else // current z is below pickZ; decrement index until current z is <= pickZ searching for pickType match
-            {
-                boolean found = false;
-                while(tracePoint.point[0] > pickZ)
-                {
-                    if(tracePoint.pointType == pickType)
-                    {
-                        indexBelow = index;
-                        found = true;
-                    }
-                    index--;
-                    if(index < 0) return false;
-                    tracePoint = tracePatchPoints[index];
-                }
-                return found;
-            }
-        }
-
-        private boolean getPrevTracePoint(byte pickType, double pickZ)
-        {
-            int index = indexAbove;
-            StsPatchPoint tracePoint = tracePatchPoints[index];
-            // if current z is above pickZ, increase index  looking for a pickType match until current z is at or below pickZ
-            if(tracePoint.point[0] <= pickZ)
-            {
-                boolean found = false;
-                while(tracePoint.point[0] <= pickZ)
-                {
-                    if(tracePoint.pointType == pickType)
-                    {
-                        indexAbove = index;
-                        found = true;
-                    }
-                    index++;
-                    if(index >= nTracePatchPoints) return false;
-                    tracePoint = tracePatchPoints[index];
-                }
-                return found;
-            }
-            else // current z is at or below pickZ; decrement index until we current z is just at or above pickZ
-            {
-                while(tracePoint.point[0] > pickZ)
-                {
-                    index--;
-                    if(index < 0) return false;
-                    tracePoint = tracePatchPoints[index];
-                }
-                // now continue decreasing until we find the first matching pointType
-                while(true)
-                {
-                    if(tracePoint.pointType == pickType)
-                    {
-                        indexAbove = index;
-                        return true;
-                    }
-                    index--;
-                    if(index < 0) return false;
-                    tracePoint = tracePatchPoints[index];
-                }
-            }
-        }
-        */
-        /*
-                private CorrelationWindow getCorrelationWindowRange(int nPatchCenterPoint, byte windowType)
-                {
-                    StsPatchPoint newPatchPoint = tracePatchPoints[nPatchCenterPoint];
-                    byte endPointType;
-                    if(windowEndIsZeroCrossing)
-                        endPointType = StsTraceUtilities.POINT_ZERO_CROSSING;
-                    else
-                        endPointType = newPatchPoint.pointType;
-                    int nAbovePoints, nBelowPoints;
-                    if(windowType == WINDOW_CENTERED)
-                    {
-                        nAbovePoints = nHalfSamples;
-                        nBelowPoints = nHalfSamples;
-                    }
-                    else if(windowType == WINDOW_ABOVE)
-                    {
-                        nAbovePoints = 2*nHalfSamples;
-                        nBelowPoints = 0;
-                    }
-                    else // WINDOW_BELOW
-                    {
-                        nAbovePoints = 0;
-                        nBelowPoints = 2*nHalfSamples;
-                    }
-                    double zCenter = newPatchPoint.point[0];
-                    double corSliceMin = zCenter;
-                    double corSliceMax = zCenter;
-
-                    int nSamePointType = 0;
-                    int nFirstPickTypePoint = nPatchCenterPoint;
-                    while (nSamePointType < nAbovePoints)
-                    {
-                        nFirstPickTypePoint--;
-                        if (nFirstPickTypePoint < 0) return null;
-                        if (matchesEndPointType(tracePatchPoints[nFirstPickTypePoint].pointType, windowEndIsZeroCrossing, endPointType))
-                        {
-                            nSamePointType++;
-                            if (nSamePointType == 1) corSliceMin = tracePatchPoints[nFirstPickTypePoint].point[0];
-                        }
-                    }
-                    nSamePointType = 0;
-                    int nLastPickTypePoint = nPatchCenterPoint;
-                    while (nSamePointType < nBelowPoints)
-                    {
-                        nLastPickTypePoint++;
-                        if (nLastPickTypePoint >= nTracePatchPoints) return null;
-                        if (matchesEndPointType(tracePatchPoints[nLastPickTypePoint].pointType, windowEndIsZeroCrossing, endPointType))
-                        {
-                            nSamePointType++;
-                            if (nSamePointType == 1) corSliceMax = tracePatchPoints[nLastPickTypePoint].point[0];
-                        }
-                    }
-                    int nFirstTracePoint = tracePatchPoints[nFirstPickTypePoint].traceIndex;
-                    int nLastTracePoint = tracePatchPoints[nLastPickTypePoint].traceIndex;
-                    int nTraceCenterPoint = tracePatchPoints[nPatchCenterPoint].traceIndex;
-                    corSliceMin = halfWindowPickDifFactor * (corSliceMin - zCenter) + zCenter;
-                    corSliceMax = halfWindowPickDifFactor * (corSliceMax - zCenter) + zCenter;
-                    return new CorrelationWindow(this, nFirstTracePoint, nLastTracePoint, nTraceCenterPoint, corSliceMin, corSliceMax);
-                }
-        */
-        boolean matchesEndPointType(byte pointType, boolean windowEndIsZeroCrossing, byte endPointType)
-        {
-            if(windowEndIsZeroCrossing)
-                return pointType == StsTraceUtilities.POINT_PLUS_ZERO_CROSSING || pointType == StsTraceUtilities.POINT_MINUS_ZERO_CROSSING;
-            else
-                return pointType == endPointType;
-        }
-    }
-
-    class CorrelationWindow
-    {
-        TracePoints trace;
-        StsPatchPoint centerPoint;
-        int centerPointIndex;
-        StsPatchPoint pointAbove;
-        StsPatchPoint pointBelow;
-        int centerSlice;
-        int minSlice;
-        int maxSlice;
-        int dSliceMinus;
-        int dSlicePlus;
-        double stretchCorrelation;
-        byte centerPointType;
-        byte abovePointType;
-        byte belowPointType;
-        byte windowType;
-
-        CorrelationWindow(TracePoints trace, StsPatchPoint centerPoint, int centerPointIndex)
-        {
-            this.trace = trace;
-            this.centerPoint = centerPoint;
-            this.centerPointIndex = centerPointIndex;
-            this.centerSlice = centerPoint.slice;
-            centerPointType = centerPoint.pointType;
-            abovePointType = StsTraceUtilities.pointTypesBefore[centerPointType];
-            belowPointType = StsTraceUtilities.pointTypesAfter[centerPointType];
-        }
-
-        boolean initialize()
-        {
-            try
-            {
-                StsPatchPoint[] tracePatchPoints = trace.tracePatchPoints;
-                int nTracePatchPoints = tracePatchPoints.length;
-                if(centerPointIndex <= 0)
-                {
-                    if(nTracePatchPoints < 2) return false;
-                    windowType = WINDOW_BELOW;
-                    pointAbove = centerPoint;
-                    pointBelow = getTracePatchPointBelow();
-                    maxSlice = pointBelow.slice;
-                    dSlicePlus = maxSlice - centerSlice;
-                    dSliceMinus = dSlicePlus;
-                    minSlice = centerSlice - dSliceMinus;
-                }
-                else if(centerPointIndex == nTracePatchPoints - 1)
-                {
-                    if(nTracePatchPoints < 2) return false;
-                    windowType = WINDOW_ABOVE;
-                    pointBelow = centerPoint;
-                    pointAbove = getTracePatchPointAbove();
-                    minSlice = pointAbove.slice;
-                    dSliceMinus = centerSlice - minSlice;
-                    dSlicePlus = dSliceMinus;
-                    maxSlice = centerSlice + dSlicePlus;
-                }
-                else
-                {
-                    windowType = WINDOW_CENTERED;
-                    pointAbove = getTracePatchPointAbove();
-                    pointBelow = getTracePatchPointBelow();
-                    minSlice = pointAbove.slice;
-                    maxSlice = pointBelow.slice;
-                    dSliceMinus = centerSlice - minSlice;
-                    dSlicePlus = maxSlice - centerSlice;
-                }
-                return true;
-            }
-            catch(Exception e)
-            {
-                StsException.outputFatalException(this, "initialize", e);
-                return false;
-            }
-        }
-
-        private StsPatchPoint getTracePatchPointBelow()
-        {
-            StsPatchPoint[] tracePatchPoints = trace.tracePatchPoints;
-            int nTracePatchPoints = tracePatchPoints.length;
-
-            for(int index = centerPointIndex + 1; index < nTracePatchPoints; index++)
-                if(tracePatchPoints[index].pointType == belowPointType)
-                    return tracePatchPoints[index];
-            return tracePatchPoints[centerPointIndex + 1];
-        }
-
-        private StsPatchPoint getTracePatchPointAbove()
-        {
-            StsPatchPoint[] tracePatchPoints = trace.tracePatchPoints;
-
-            for(int index = centerPointIndex - 1; index >= 0; index--)
-                if(tracePatchPoints[index].pointType == abovePointType)
-                    return tracePatchPoints[index];
-            return tracePatchPoints[centerPointIndex - 1];
-        }
-
-        /**
-         * On the other trace, starting from the point following the last correlated point,
-         * find any and all picks of the center pick type on the other trace which match.
-         * check that the above and below pick types match as well
-         */
-        CorrelationWindow findMatchingWindows(TracePoints otherTrace, float stretchCorrelation)
-        {
-            int otherTraceCenterPointIndex = otherTrace.centerPointIndex + 1;
-            int nOtherTracePoints = otherTrace.nTracePatchPoints;
-            CorrelationWindow matchingWindow = null;
-            double bestCorrelation = 0.0;
-            int centerSlice = centerPoint.slice;
-            while(otherTraceCenterPointIndex < nOtherTracePoints)
-            {
-                StsPatchPoint otherTraceCenterPoint = otherTrace.tracePatchPoints[otherTraceCenterPointIndex];
-                int otherCenterSlice = otherTraceCenterPoint.slice;
-                if(otherCenterSlice > maxSlice) break;
-                if(otherCenterSlice >= minSlice && centerPointType == otherTraceCenterPoint.pointType)
-                {
-                    CorrelationWindow otherWindow = checkCreateMatchingWindow(otherTrace, otherTraceCenterPoint, otherCenterSlice, otherTraceCenterPointIndex, centerSlice, stretchCorrelation);
-                    if(otherWindow != null && otherWindow.stretchCorrelation > bestCorrelation)
-                    {
-                        matchingWindow = otherWindow;
-                        bestCorrelation = matchingWindow.stretchCorrelation;
-                    }
-                }
-                otherTraceCenterPointIndex++;
-            }
-            return matchingWindow;
-        }
-
-        CorrelationWindow checkCreateMatchingWindow(TracePoints otherTrace, StsPatchPoint otherTraceCenterPoint, int otherCenterSlice, int otherTraceCenterPointIndex, int centerSlice, float stretchCorrelation)
-        {
-            CorrelationWindow otherWindow = new CorrelationWindow(otherTrace, otherTraceCenterPoint, otherTraceCenterPointIndex);
-            if(!otherWindow.initialize()) return null;
-            if(otherWindow.isZCenterOutsideWindow(centerSlice) || !matches(otherWindow, stretchCorrelation))
-                return null;
-            else
-                return otherWindow;
-        }
-
-        /** check the various correlation measures and return the otherWindow if it matches; otherwise return null */
-        boolean matches(CorrelationWindow otherWindow, float stretchCorrelation)
-        {
-            if(otherWindow.windowType != windowType) return false;
-            if(otherWindow.pointAbove.pointType != pointAbove.pointType) return false;
-            if(otherWindow.pointBelow.pointType != pointBelow.pointType) return false;
-            // check correlation stretch
-            double minusStretchFactor = 1.0;
-            double plusStretchFactor = 1.0;
-            if(windowType != WINDOW_BELOW)
-            {
-                double dzMinusOtherScalar = ((double)dSliceMinus) / otherWindow.dSliceMinus;
-                minusStretchFactor = dzMinusOtherScalar;
-                if(minusStretchFactor > 1.0f)
-                    minusStretchFactor = 1 / minusStretchFactor;
-            }
-            else if(windowType != WINDOW_ABOVE)
-            {
-                double dzPlusOtherScalar = (double)dSlicePlus / otherWindow.dSlicePlus;
-                plusStretchFactor = dzPlusOtherScalar;
-                if(plusStretchFactor > 1.0f)
-                    plusStretchFactor = 1 / plusStretchFactor;
-            }
-            double stretchFactor = Math.min(minusStretchFactor, plusStretchFactor);
-            otherWindow.stretchCorrelation = stretchFactor;
-            return stretchFactor >= stretchCorrelation;
-        }
-
-        boolean isZCenterOutsideWindow(int centerSlice)
-        {
-            return centerSlice < minSlice || centerSlice > maxSlice;
-        }
+        if(debug) StsException.systemDebug(this, "processPrevRowGrids", "prev row: " + (row - 1) + " added " + nDisconnectedGrids + " disconnected grids");
     }
 
     public StsColorscale getCurvatureColorscale()
@@ -1615,8 +1428,8 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
             if(dirNo == StsCursor3d.ZDIR)
             {
                 if(getDisplaySurfs())
-                    displayPatchesNearXYZCursors(glPanel3d);
-                //        displayPatchesNearZCursor(glPanel3d, dirCoordinate);
+                    // displayPatchesNearXYZCursors(glPanel3d);
+                    displayPatchesNearZCursor(glPanel3d, dirCoordinate);
                 return;
             }
             if(dirNo == StsCursor3d.YDIR)

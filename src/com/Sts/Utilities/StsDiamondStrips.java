@@ -23,16 +23,16 @@ public class StsDiamondStrips
     float yMin;
     int rowMin;
     int colMin;
-    float[][] rowLeftCenterPointsZ;
-    float[][] colBotCenterPointsZ;
-    float[][] rowRiteCenterPointsZ;
-    float[][] colTopCenterPointsZ;
+    float[][] leftCenterPointsZ;
+    float[][] botCenterPointsZ;
+    float[][] riteCenterPointsZ;
+    float[][] topCenterPointsZ;
     float[][] pointsZ;
     float[][][] normals;
-    float[][][] rowLeftCenterNormals;
-    float[][][] colBotCenterNormals;
-    float[][][] rowRiteCenterNormals;
-    float[][][] colTopCenterNormals;
+    float[][][] leftCenterNormals;
+    float[][][] botCenterNormals;
+    float[][][] riteCenterNormals;
+    float[][][] topCenterNormals;
     boolean[][] hasRowLinks;
     boolean[][] hasColLinks;
 
@@ -65,17 +65,24 @@ public class StsDiamondStrips
     {
         int row = -1, col = -1;
 
-        rowLeftCenterPointsZ = new float[nRows][nCols];
-        rowRiteCenterPointsZ = new float[nRows][nCols];
-        colBotCenterPointsZ = new float[nRows][nCols];
-        colTopCenterPointsZ = new float[nRows][nCols];
-        rowLeftCenterNormals = new float[nRows][nCols][];
-        rowRiteCenterNormals = new float[nRows][nCols][];
-        colBotCenterNormals = new float[nRows][nCols][];
-        colTopCenterNormals = new float[nRows][nCols][];
+        leftCenterPointsZ = new float[nRows][nCols];
+        riteCenterPointsZ = new float[nRows][nCols];
+        botCenterPointsZ = new float[nRows][nCols];
+        topCenterPointsZ = new float[nRows][nCols];
+        leftCenterNormals = new float[nRows][nCols][];
+        riteCenterNormals = new float[nRows][nCols][];
+        botCenterNormals = new float[nRows][nCols][];
+        topCenterNormals = new float[nRows][nCols][];
 
         try
         {
+            for (row = 0; row < nRows; row++)
+            {
+                Arrays.fill(leftCenterPointsZ[row], nullValue);
+                Arrays.fill(riteCenterPointsZ[row], nullValue);
+                Arrays.fill(botCenterPointsZ[row], nullValue);
+                Arrays.fill(topCenterPointsZ[row], nullValue);
+            }
             // iterate over grid cells and assign values for each
             for (row = 0; row < nRows; row++)
             {
@@ -103,11 +110,12 @@ public class StsDiamondStrips
                         {
                             if (hasNextRowLink) // compute two column centers and normals 6
                             {
-                                colBotCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col], normals[row][col + 1]);
-                                colTopCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row + 1][col], normals[row + 1][col + 1]);
-                                colBotCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row][col + 1]);
-                                colTopCenterPointsZ[row][col] = averageValues(pointsZ[row + 1][col], pointsZ[row + 1][col + 1]);
+                                if(col < nCols+1) botCenterNormals[row][col] = addVectorsNormalize(normals[row][col], normals[row][col + 1]);
+                                if(row < nRows+1) topCenterNormals[row][col] = addVectorsNormalize(normals[row + 1][col], normals[row + 1][col + 1]);
+                                if(col < nCols+1) botCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row][col + 1]);
+                                if(row < nRows+1) topCenterPointsZ[row][col] = averageValues(pointsZ[row + 1][col], pointsZ[row + 1][col + 1]);
                             }
+                            // with two links we will have either 3 or 4 active points, so min argument below is 3
                             else if (hasColLink) // 1
                             {
                                 averageGridCellPointsAndNormals(row, col, usePoints, 3);
@@ -121,10 +129,10 @@ public class StsDiamondStrips
                         {
                             if (hasNextColLink) // compute two row centers and normals   5
                             {
-                                rowLeftCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col], normals[row + 1][col]);
-                                rowRiteCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col + 1], normals[row + 1][col + 1]);
-                                rowLeftCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row + 1][col]);
-                                rowRiteCenterPointsZ[row][col] = averageValues(pointsZ[row][col + 1], pointsZ[row + 1][col + 1]);
+                                if(row < nRows+1) leftCenterNormals[row][col] = addVectorsNormalize(normals[row][col], normals[row + 1][col]);
+                                if(col < nCols+1) riteCenterNormals[row][col] = addVectorsNormalize(normals[row][col + 1], normals[row + 1][col + 1]);
+                                if(row < nRows+1) leftCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row + 1][col]);
+                                if(col < nCols+1) riteCenterPointsZ[row][col] = averageValues(pointsZ[row][col + 1], pointsZ[row + 1][col + 1]);
                             }
                             else //  no rowLink or nextColLink so must have nextRowlink 4
                             {
@@ -140,23 +148,23 @@ public class StsDiamondStrips
                     {
                         if (hasRowLink)
                         {
-                            colBotCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col], normals[row][col + 1]);
-                            colBotCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row][col + 1]);
+                            botCenterNormals[row][col] = addVectorsNormalize(normals[row][col], normals[row][col + 1]);
+                            botCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row][col + 1]);
                         }
                         else if (hasNextRowLink)
                         {
-                            colTopCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row + 1][col], normals[row + 1][col + 1]);
-                            colTopCenterPointsZ[row][col] = averageValues(pointsZ[row + 1][col], pointsZ[row + 1][col + 1]);
+                            topCenterNormals[row][col] = addVectorsNormalize(normals[row + 1][col], normals[row + 1][col + 1]);
+                            topCenterPointsZ[row][col] = averageValues(pointsZ[row + 1][col], pointsZ[row + 1][col + 1]);
                         }
                         else if (hasColLink)
                         {
-                            rowLeftCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col], normals[row + 1][col]);
-                            rowLeftCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row + 1][col]);
+                            leftCenterNormals[row][col] = addVectorsNormalize(normals[row][col], normals[row + 1][col]);
+                            leftCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row + 1][col]);
                         }
                         else // hasNextColLink
                         {
-                            rowRiteCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col + 1], normals[row + 1][col + 1]);
-                            rowRiteCenterPointsZ[row][col] = averageValues(pointsZ[row][col + 1], pointsZ[row + 1][col + 1]);
+                            riteCenterNormals[row][col] = addVectorsNormalize(normals[row][col + 1], normals[row + 1][col + 1]);
+                            riteCenterPointsZ[row][col] = averageValues(pointsZ[row][col + 1], pointsZ[row + 1][col + 1]);
                         }
                     }
                     else // nLinks == 0
@@ -170,6 +178,13 @@ public class StsDiamondStrips
         {
             StsException.outputWarningException(this, "computeGridCenterValues", "Failed at row: " + row + " col: " + col, e);
         }
+    }
+
+    public static final float[] addVectorsNormalize(float[] a, float[] b)
+    {
+        float[] vector = StsMath.addVectorsNormalize(a, b);
+        if(vector != null) return vector;
+        else               return verticalNormal;
     }
 
     private boolean[][] getUsePointsFromLinks(boolean hasRowLink, boolean hasColLink, boolean hasNextRowLink, boolean hasNextColLink)
@@ -189,57 +204,72 @@ public class StsDiamondStrips
     private void averageGridCellPointsAndNormals(int row, int col, boolean[][] usePoints, int min)
     {
         float[] normal = averageGridNormals(row, col, usePoints, min);
-        rowLeftCenterNormals[row][col] = normal;
-        colBotCenterNormals[row][col] = normal;
-        rowRiteCenterNormals[row][col] = normal;
-        colTopCenterNormals[row][col] = normal;
+        leftCenterNormals[row][col] = normal;
+        botCenterNormals[row][col] = normal;
+        riteCenterNormals[row][col] = normal;
+        topCenterNormals[row][col] = normal;
         float centerPointZ = averageGridPoints(row, col, usePoints, min);
-        rowLeftCenterPointsZ[row][col] = centerPointZ;
-        colBotCenterPointsZ[row][col] = centerPointZ;
-        rowRiteCenterPointsZ[row][col] = centerPointZ;
-        colTopCenterPointsZ[row][col] = centerPointZ;
+        leftCenterPointsZ[row][col] = centerPointZ;
+        botCenterPointsZ[row][col] = centerPointZ;
+        riteCenterPointsZ[row][col] = centerPointZ;
+        topCenterPointsZ[row][col] = centerPointZ;
     }
 
     private float[] averageGridNormals(int row, int col, boolean[][] usePoints, int min)
     {
-        float[][] gridNormals = new float[4][];
-        if (usePoints[0][0])
-            gridNormals[0] = normals[row][col];
-        if (usePoints[0][1])
-            gridNormals[1] = normals[row][col + 1];
-        if (usePoints[1][1])
-            gridNormals[2] = normals[row + 1][col + 1];
-        if (usePoints[1][0])
-            gridNormals[3] = normals[row + 1][col];
+        try
+        {
+            float[][] gridNormals = new float[4][];
+            if (usePoints[0][0])
+                gridNormals[0] = normals[row][col];
+            if (usePoints[0][1] && col < nCols)
+                gridNormals[1] = normals[row][col + 1];
+            if (usePoints[1][1] && row < nRows && col < nCols)
+                gridNormals[2] = normals[row + 1][col + 1];
+            if (usePoints[1][0] && row < nRows)
+                gridNormals[3] = normals[row + 1][col];
 
-        float[] normal = StsMath.addVectorsNormalize(gridNormals, 3, min);
-        return normal;
+            float[] normal = StsMath.addVectorsNormalize(gridNormals, 3, min);
+            return normal;
+        }
+        catch(Exception e)
+        {
+            return verticalNormal;
+        }
     }
 
     private float averageGridPoints(int row, int col, boolean[][] usePoints, int min)
     {
-        float[] gridPoints = new float[4];
-        Arrays.fill(gridPoints, nullValue);
-        if (usePoints[0][0])
-            gridPoints[0] = pointsZ[row][col];
-        if (usePoints[0][1])
-            gridPoints[1] = pointsZ[row][col + 1];
-        if (usePoints[1][1])
-            gridPoints[2] = pointsZ[row + 1][col + 1];
-        if (usePoints[1][0])
-            gridPoints[3] = pointsZ[row + 1][col];
+        try
+        {
+            float[] gridPoints = new float[4];
+            Arrays.fill(gridPoints, nullValue);
+            if (usePoints[0][0])
+                gridPoints[0] = pointsZ[row][col];
+            if (usePoints[0][1])
+                gridPoints[1] = pointsZ[row][col + 1];
+            if (usePoints[1][1])
+                gridPoints[2] = pointsZ[row + 1][col + 1];
+            if (usePoints[1][0])
+                gridPoints[3] = pointsZ[row + 1][col];
 
-        return StsMath.average(gridPoints, nullValue, min);
+            return StsMath.average(gridPoints, nullValue, min);
+        }
+        catch(Exception e)
+        {
+            StsException.outputWarningException(this, "averageGridPoints", e);
+            return nullValue;
+        }
     }
 
     private void computeGridRowCenterValues()
     {
-        rowLeftCenterPointsZ = new float[nRows][nCols - 1];
+        leftCenterPointsZ = new float[nRows][nCols - 1];
 
         for (int row = 0; row < nRows; row++)
         {
             for (int col = 0; col < nCols - 1; col++)
-                rowLeftCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row][col + 1]);
+                leftCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row][col + 1]);
         }
     }
 
@@ -251,31 +281,31 @@ public class StsDiamondStrips
 
     private void computeGridColCenterValues()
     {
-        colBotCenterPointsZ = new float[nRows - 1][nCols];
+        botCenterPointsZ = new float[nRows - 1][nCols];
 
         for (int col = 0; col < nCols; col++)
         {
             for (int row = 0; row < nRows - 1; row++)
-                colBotCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row + 1][col]);
+                botCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row + 1][col]);
         }
     }
 
     private void computeRowCenterNormals()
     {
-        rowLeftCenterNormals = new float[nRows][nCols - 1][3];
+        leftCenterNormals = new float[nRows][nCols - 1][3];
 
         for (int row = 0; row < nRows; row++)
             for (int col = 0; col < nCols - 1; col++)
-                rowLeftCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col], normals[row][col + 1]);
+                leftCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col], normals[row][col + 1]);
     }
 
     private void computeColCenterNormals()
     {
-        colBotCenterNormals = new float[nRows - 1][nCols][3];
+        botCenterNormals = new float[nRows - 1][nCols][3];
 
         for (int col = 0; col < nCols; col++)
             for (int row = 0; row < nRows - 1; row++)
-                colBotCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col], normals[row + 1][col]);
+                botCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col], normals[row + 1][col]);
     }
 
     private void computeHasRowLinks()
@@ -323,38 +353,49 @@ public class StsDiamondStrips
 
     final float getPointZ(int row, int col)
     {
-        return pointsZ[row][col];
-    }
-
-    final float getRowCenterPointZ(int row, int col)
-    {
-        return rowLeftCenterPointsZ[row][col];
-    }
-
-    final float getColCenterPointZ(int row, int col)
-    {
-        return colBotCenterPointsZ[row][col];
+        float pointZ = pointsZ[row][col];
+        if(pointZ != nullValue) return pointZ;
+        StsException.systemError(this, "getPointZ", "Null Z at row: " + row + " col: " + col);
+        return 0.0f;
     }
 
     final float[] getNormal(int row, int col)
     {
         float[] normal = normals[row][col];
         if (normal != null) return normal;
-        else return verticalNormal;
+        StsException.systemDebug(this, "getNormal", "Failed for row: " + row + " col: " + col);
+        return verticalNormal;
     }
 
-    final float[] getRowLeftCenterNormal(int row, int col)
+    final float[] getLeftCenterNormal(int row, int col)
     {
-        float[] normal = rowLeftCenterNormals[row][col];
-        if (normal != null) return normal;
-        else return verticalNormal;
+        float[] normal = leftCenterNormals[row][col];
+        if(normal != null) return normal;
+        StsException.systemDebug(this, "getLeftCenterNormal", "Failed for row: " + row + " col: " + col);
+        return verticalNormal;
+     }
+
+    final float[] getRiteCenterNormal(int row, int col)
+    {
+        float[] normal = riteCenterNormals[row][col];
+        if(normal != null) return normal;
+        StsException.systemDebug(this, "getRiteCenterNormal", "Failed for row: " + row + " col: " + col);
+        return verticalNormal;    }
+
+    final float[] getBotCenterNormal(int row, int col)
+    {
+        float[] normal = botCenterNormals[row][col];
+        if(normal != null) return normal;
+        StsException.systemDebug(this, "getBotCenterNormal", "Failed for row: " + row + " col: " + col);
+        return verticalNormal;
     }
 
-    final float[] getColCenterNormal(int row, int col)
+    final float[] getTopCenterNormal(int row, int col)
     {
-        float[] normal = colBotCenterNormals[row][col];
-        if (normal != null) return normal;
-        else return verticalNormal;
+        float[] normal = topCenterNormals[row][col];
+        if(normal != null) return normal;
+        StsException.systemDebug(this, "getTopCenterNormal", "Failed for row: " + row + " col: " + col);
+        return verticalNormal;
     }
 
     final float getValue(int row, int col)
@@ -407,21 +448,23 @@ public class StsDiamondStrips
         }
     }
 
+    /** row diamond is from row,col (left) to row,col+1 (right) with botCenter at row,col (above) and topCenter at row-1,col (below) */
     private void drawRowDiamond(GL gl, int row, int col, float rowY, float colX)
     {
-        if (row == 0)
-            drawTopRowTriangle(gl, row, col, rowY, colX);
+        if (row == 0) // only draw triangle above row axis */
+            drawTopTriangle(gl, row, col, rowY, colX);
         else if (row == nRows - 1)
-            drawBotRowTriangle(gl, row, col, rowY, colX);
+            drawBotTriangle(gl, row, col, rowY, colX);
         else
         {
             try
             {
                 gl.glBegin(GL.GL_QUADS);
-                drawBotRowCenterPoint(gl, row, col, rowY, colX);
-                drawRiteRowPoint(gl, row, col, rowY, colX);
-                drawTopRowCenterPoint(gl, row, col, rowY, colX);
-                drawLeftRowPoint(gl, row, col, rowY, colX);
+                drawLeftPoint(gl, row, col, rowY, colX); // left
+                drawBotCenterPoint(gl, row, col, rowY, colX); // below
+                drawRitePoint(gl, row, col, rowY, colX + xInc / 2); // rite
+                drawTopCenterPoint(gl, row, col, rowY, colX); // above
+
                 gl.glEnd();
             }
             catch(Exception e)
@@ -435,14 +478,14 @@ public class StsDiamondStrips
         }
     }
 
-    private void drawBotRowTriangle(GL gl, int row, int col, float rowY, float colX)
+    private void drawBotTriangle(GL gl, int row, int col, float rowY, float colX)
     {
         try
         {
             gl.glBegin(GL.GL_TRIANGLES);
-            drawBotRowCenterPoint(gl, row, col, rowY, colX);
-            drawRiteRowPoint(gl, row, col, rowY, colX);
-            drawLeftRowPoint(gl, row, col, rowY, colX);
+            drawLeftPoint(gl, row, col, rowY, colX);
+            drawBotCenterPoint(gl, row, col, rowY, colX);
+            drawRitePoint(gl, row, col, rowY, colX);
             gl.glEnd();
         }
         catch(Exception e)
@@ -455,14 +498,14 @@ public class StsDiamondStrips
         }
     }
 
-    private void drawTopRowTriangle(GL gl, int row, int col, float rowY, float colX)
+    private void drawTopTriangle(GL gl, int row, int col, float rowY, float colX)
     {
         try
         {
             gl.glBegin(GL.GL_TRIANGLES);
-            drawTopRowCenterPoint(gl, row, col, rowY, colX);
-            drawLeftRowPoint(gl, row, col, rowY, colX);
-            drawRiteRowPoint(gl, row, col, rowY, colX);
+            drawLeftPoint(gl, row, col, rowY, colX);
+            drawRitePoint(gl, row, col, rowY, colX);
+            drawTopCenterPoint(gl, row, col, rowY, colX);
             gl.glEnd();
         }
         catch(Exception e)
@@ -475,33 +518,38 @@ public class StsDiamondStrips
         }
     }
 
-    private void drawBotRowCenterPoint(GL gl, int row, int col, float rowY, float colX)
+    /** draw the center below this row in this col which is the topCenter of the row below.
+     *  coordinates are at the given row,col, so add xInc/2 and subtract yInc/2 */
+    private void drawBotCenterPoint(GL gl, int row, int col, float rowY, float colX)
     {
-        gl.glNormal3fv(colTopCenterNormals[row - 1][col], 0);
-        gl.glVertex3f(colX + xInc / 2, rowY - yInc / 2, colTopCenterPointsZ[row - 1][col]);
+        gl.glNormal3fv(getTopCenterNormal(row-1, col), 0);
+        gl.glVertex3f(colX + xInc / 2, rowY - yInc / 2, topCenterPointsZ[row-1][col]);
     }
 
-    private void drawTopRowCenterPoint(GL gl, int row, int col, float rowY, float colX)
+    /** draw the center above this row in this col which is the botCenter of this row.
+     *  coordinates are at the given row,col, so add xInc/2 and add yInc/2 */
+    private void drawTopCenterPoint(GL gl, int row, int col, float rowY, float colX)
     {
-        gl.glNormal3fv(colBotCenterNormals[row][col], 0);
-        gl.glVertex3f(colX + xInc / 2, rowY + yInc / 2, colBotCenterPointsZ[row][col]);
+        gl.glNormal3fv(getBotCenterNormal(row, col), 0);
+        gl.glVertex3f(colX + xInc / 2, rowY + yInc / 2, botCenterPointsZ[row][col]);
     }
 
+    /** col diamond is from row,col (bot) to row+1,col (top) with centers at row-1,col (left) and row,col (rite) */
     private void drawColDiamond(GL gl, int row, int col, float rowY, float colX)
     {
         if (col == 0)
-            drawRiteColTriangle(gl, row, col, rowY, colX);
+            drawRiteTriangle(gl, row, col, rowY, colX);
         else if (col == nCols - 1)
-            drawLeftColTriangle(gl, row, col, rowY, colX);
+            drawLeftTriangle(gl, row, col, rowY, colX);
         else
         {
             try
             {
                 gl.glBegin(GL.GL_QUADS);
-                drawLeftColCenterPoint(gl, row, col, rowY, colX);
-                drawBotColPoint(gl, row, col, rowY, colX);
-                drawRiteColCenterPoint(gl, row, col, rowY, colX);
-                drawTopColPoint(gl, row, col, rowY, colX);
+                drawLeftCenterPoint(gl, row, col, rowY, colX);
+                drawBotPoint(gl, row, col, rowY, colX);
+                drawRiteCenterPoint(gl, row, col, rowY, colX);
+                drawTopPoint(gl, row, col, rowY, colX);
                 gl.glEnd();
             } catch (Exception e)
             {
@@ -513,14 +561,14 @@ public class StsDiamondStrips
         }
     }
 
-    private void drawLeftColTriangle(GL gl, int row, int col, float rowY, float colX)
+    private void drawLeftTriangle(GL gl, int row, int col, float rowY, float colX)
     {
         try
         {
             gl.glBegin(GL.GL_TRIANGLES);
-            drawLeftColCenterPoint(gl, row, col, rowY, colX);
-            drawBotColPoint(gl, row, col, rowY, colX);
-            drawTopColPoint(gl, row, col, rowY, colX);
+            drawBotPoint(gl, row, col, rowY, colX);
+            drawTopPoint(gl, row, col, rowY, colX);
+            drawLeftCenterPoint(gl, row, col, rowY, colX);
             gl.glEnd();
         }
         catch(Exception e)
@@ -533,14 +581,14 @@ public class StsDiamondStrips
         }
     }
 
-    private void drawRiteColTriangle(GL gl, int row, int col, float rowY, float colX)
+    private void drawRiteTriangle(GL gl, int row, int col, float rowY, float colX)
     {
         try
         {
             gl.glBegin(GL.GL_TRIANGLES);
-            drawRiteColCenterPoint(gl, row, col, rowY, colX);
-            drawTopColPoint(gl, row, col, rowY, colX);
-            drawBotColPoint(gl, row, col, rowY, colX);
+            drawBotPoint(gl, row, col, rowY, colX);
+            drawRiteCenterPoint(gl, row, col, rowY, colX);
+            drawTopPoint(gl, row, col, rowY, colX);
             gl.glEnd();
         }
         catch(Exception e)
@@ -553,34 +601,39 @@ public class StsDiamondStrips
         }
     }
 
-    private void drawLeftColCenterPoint(GL gl, int row, int col, float rowY, float colX)
+    /** draw the center left of this col in this row which is the riteCenter of the cell to the left.
+     *  coordinates are at the given row,col, so subtract xInc/2 and add yInc/2 */
+    private void drawLeftCenterPoint(GL gl, int row, int col, float rowY, float colX)
     {
-        gl.glNormal3fv(rowRiteCenterNormals[row][col - 1], 0);
-        gl.glVertex3f(colX - xInc / 2, rowY + yInc / 2, rowRiteCenterPointsZ[row][col - 1]);
+        gl.glNormal3fv(getRiteCenterNormal(row, col - 1), 0);
+        gl.glVertex3f(colX - xInc / 2, rowY + yInc / 2, leftCenterPointsZ[row][col-1]);
     }
 
-    private void drawRiteColCenterPoint(GL gl, int row, int col, float rowY, float colX)
+    /** draw the center rite of this col in this row which is the leftCenter of this cell.
+     *  coordinates are at the given row,col, so add xInc/2 and add yInc/2 */
+    private void drawRiteCenterPoint(GL gl, int row, int col, float rowY, float colX)
     {
-        gl.glNormal3fv(rowLeftCenterNormals[row][col], 0);
-        gl.glVertex3f(colX + xInc / 2, rowY + yInc / 2, rowLeftCenterPointsZ[row][col]);
+
+        gl.glNormal3fv(getLeftCenterNormal(row, col), 0);
+        gl.glVertex3f(colX + xInc / 2, rowY + yInc / 2, leftCenterPointsZ[row][col]);
     }
 
-    private void drawLeftRowPoint(GL gl, int row, int col, float rowY, float colX)
+    private void drawLeftPoint(GL gl, int row, int col, float rowY, float colX)
     {
         drawPoint(gl, row, col, rowY, colX);
     }
 
-    private void drawRiteRowPoint(GL gl, int row, int col, float rowY, float colX)
+    private void drawRitePoint(GL gl, int row, int col, float rowY, float colX)
     {
         drawPoint(gl, row, col+1, rowY, colX + xInc);
     }
 
-    private void drawBotColPoint(GL gl, int row, int col, float rowY, float colX)
+    private void drawBotPoint(GL gl, int row, int col, float rowY, float colX)
     {
         drawPoint(gl, row, col, rowY, colX);
     }
 
-    private void drawTopColPoint(GL gl, int row, int col, float rowY, float colX)
+    private void drawTopPoint(GL gl, int row, int col, float rowY, float colX)
     {
         drawPoint(gl, row+1, col, rowY + yInc, colX);
     }
@@ -588,8 +641,6 @@ public class StsDiamondStrips
     private void drawPoint(GL gl, int row, int col, float rowY, float colX)
     {
         gl.glNormal3fv(getNormal(row, col), 0);
-        if(pointsZ[row][col] == nullValue)
-            StsException.systemError(this, "drawPoint", "Null Z at row: " + row + " col: " + col);
-        gl.glVertex3f(colX, rowY, pointsZ[row][col]);
+        gl.glVertex3f(colX, rowY, getPointZ(row, col));
     }
 }

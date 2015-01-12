@@ -890,6 +890,16 @@ public class StsModel extends StsSerialize
 
     }
 
+    public void blockTransactions()
+    {
+        if(db != null)db.blockTransactions();
+    }
+
+    public void saveTransactions()
+    {
+        if(db != null)db.saveTransactions();
+    }
+
     static public StsModel constructor(DataInputStream dis_)
     {
         try

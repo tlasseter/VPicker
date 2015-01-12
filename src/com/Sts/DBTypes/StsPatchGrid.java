@@ -23,28 +23,35 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 {
     private static final long serialVersionUID = 1L;
     /** this is the parent id of this child patchGrid */
-    int id;
-    // /** the parent multilayered patch grid is divided into single-valued sheets; each sheet is divided into child patchGrids; this is the sheet number for this child grid */
-    // int nSheet;
-    /** the final id of this patch in gridList; this patch may be a layer from an original patch whose id is id */
+    public int id;
+     /** the final id of this patch in gridList; this patch may be a layer from an original patch whose id is id */
     int idFinal;
     /** type of this grid: Min, Max +Zero-crossing, or -Zero-crossing */
     byte patchType;
-    //TODO make patchPoints a row&col sorted list for compactness; add methods to compare patchPoint lists for occupancy, etc.
-    StsPatchPoint[][] patchPoints;
     boolean isVisible = true;
     StsPatchVolume patchVolume;
     int nPatchPoints;
-    int nRows;
-    int nCols;
     float dataMin;
     float dataMax;
     float zMin = StsParameters.largeFloat;
     float zMax = -StsParameters.largeFloat;
-    /** included for debugging purposes only */
-    transient int nSheets;
+
+    int nRows = 0;
+    int nCols = 0;
+
+    float[][] pointsZ;
+    float[][] rowCorrels;
+    float[][] colCorrels;
+
+    transient StsPatchPoint[][] patchPoints = null;
+    /** flag indicating this patchGrid has been added to current patchVolume.rowGrids hashmap list; avoids overhead of trying to re-add */
+    transient public boolean rowGridAdded = false;
+
+    transient RowColGrid rowColGrid = new RowColGrid(rowMin, rowMax, colMin, colMax);
+
+    transient float[][] value;
+
     transient float[][] curvature;
-    transient float[][] pointsZ;
 
     transient StsDiamondStrips diamondStrips;
 
@@ -52,10 +59,6 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
     transient public double sum = 0;
     /** points on this grid are in a hashMap with a hash key whose value is the grid index: col + row*patchVolume.nCols */
     // transient HashMap<Integer, StsPatchPoint> patchPointsHashMap;
-    transient ArrayList<StsPatchConnection> connectionsList;
-    transient HashMap<Integer, StsPatchPoint> pointHashMap;
-    transient StsList tStrips;
-    transient float[][][] tStripNormals;
     /** max size of all patches generated; printed out for diagnostics */
     static int maxGridSize = 0;
     /** index to be assigned to next patchGrid created; this is the index during construction for a multilayered patch;
@@ -81,19 +84,19 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 
     static boolean sortRowFirst = true;
 
-    static int nOverlappedPoints = 0;
-    static int nVolumeRows;
-    static int nVolumeCols;
-    static ArrayList<OverlapPoint> overlapPoints;
+    static final int largeInt = Integer.MAX_VALUE;
 
-    static final boolean debug = false;
+    static final int NO_PATCH_DEBUG = -1;
     /** various debug print of patches in rowGrid and prevRowGrid arrays; check if this is not -1 and prints if id matches this value.  Make this -1 if you want no debug prints. */
-    static final int debugPatchInitialID = -1;
-    /** debugPatchID may change if orginal patch is merged into a new one; when this occurs, set debugCurrentPatchID to new one and track it */
+    static final int debugPatchInitialID = NO_PATCH_DEBUG;
+    /** debugPatchID may change if original patch is merged into a new one; when this occurs, set debugCurrentPatchID to new one and track it */
     static int debugPatchID = debugPatchInitialID;
 
-    static final int debugLayerPointRow = -1;
-    static final int debugLayerPointCol = -1;
+    static final int debugPointRow = 8;
+    static final int debugPointCol = 8;
+
+    static final boolean debug = debugPatchInitialID != -1;
+    static final boolean debugPoint = debugPointRow != -1 && debugPointCol != -1;
 
     public StsPatchGrid()
     {
@@ -105,18 +108,6 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
         this.patchType = patchType;
     }
 
-    static public void staticInitialize(int nVolumeRows_, int nVolumeCols_)
-    {
-        maxGridSize = 0;
-        nextPatchID = 0;
-        nextFinalPatchID = 0;
-        nOverlappedPoints = 0;
-        nVolumeRows = nVolumeRows_;
-        nVolumeCols = nVolumeCols_;
-        debugPatchID = debugPatchInitialID;
-        if(debug) overlapPoints = new ArrayList();
-    }
-
     static public StsPatchGrid construct(StsPatchVolume patchVolume, byte patchType)
     {
         StsPatchGrid patchGrid = new StsPatchGrid(patchVolume, patchType);
@@ -124,99 +115,373 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
         return patchGrid;
     }
 
-    static public StsPatchGrid constructFinal(StsPatchVolume patchVolume, byte patchType, int id, int rowMin, int rowMax, int colMin, int colMax)
+    static public void staticInitialize()
     {
-        StsPatchGrid patchGrid = new StsPatchGrid(patchVolume, patchType);
-        patchGrid.setupFinal(id, rowMin, rowMax, colMin, colMax);
-        return patchGrid;
+        nextPatchID = 0;
+        nextFinalPatchID = 0;
+        debugPatchID = debugPatchInitialID;
     }
 
     private void setup()
     {
         id = nextPatchID++;
-        // patchPointsHashMap = new HashMap<Integer, StsPatchPoint>();
-        connectionsList = new ArrayList<StsPatchConnection>();
         if(debugPatchID != -1 && id == debugPatchID)
-            StsException.systemDebug(this, "setup", "patch " + id + " initialized");
-    }
-    private void setupFinal(int id, int rowMin, int rowMax, int colMin, int colMax)
-    {
-        this.id = id;
-        this.rowMin = rowMin;
-        this.rowMax = rowMax;
-        this.colMin = colMin;
-        this.colMax = colMax;
-        nRows = rowMax - rowMin + 1;
-        nCols = colMax - colMin + 1;
-        patchPoints = new StsPatchPoint[nRows][nCols];
-        idFinal = nextFinalPatchID++;
-        if(debugPatchID != -1 && id == debugPatchID)
+            //if(debug())
             StsException.systemDebug(this, "setup", "patch " + id + " initialized");
     }
 
-    /** add this connection to the initial (possibly multilayered) patch */
-    void addInitialPatchConnection(StsPatchConnection connection)
+    public boolean debug()
     {
-        addPatchConnection(connection, id);
+        return debugPatchID != -1 && id == debugPatchID;
     }
 
-   /** Add this connection between newPoint and otherPoint to the patchGrid.
-     *  Add the two connected points to this patch unless they already belong to another patch.
-     *  Add the connection to this patch.
-     * @param connection  connection between two points
+    /** give two different size grids with this intersection, check if we can merge the two;
+     *  possible only if they don't have common occupancy of any row-col location
+     * @param patchGrid1 first of patchGrids to merge
+     * @param patchGrid2 second of patchGrids to merge
      */
-   void addPatchConnection(StsPatchConnection connection, int id)
+    static public boolean mergePatchPointsOK(StsPatchGrid patchGrid1, StsPatchGrid patchGrid2)
     {
-        StsPatchPoint newPoint = connection.newPoint;
-        StsPatchPoint otherPoint = connection.otherPoint;
-        newPoint.patchID = id;
-        otherPoint.patchID = id;
-
-        // otherPoint is always before new point in either row or column
-        if(otherPoint.row < rowMin) rowMin = otherPoint.row;
-        if(otherPoint.col < colMin) colMin = otherPoint.col;
-        if(newPoint.row > rowMax) rowMax = newPoint.row;
-        if(newPoint.col > colMax) colMax = newPoint.col;
-
-        if(debugPatchID != -1 && (connection.newPoint.patchID == debugPatchID || connection.newPoint.patchID == debugPatchID))
-            StsException.systemDebug(this, "addPatchConnection", "connection: " + connection.toString());
-        connectionsList.add(connection);
-
-    }
-
-    /**
-     * Merge another patchGrid into this by creating a union of the two bounding boxes and
-     * copy the floats from the originalGrid and otherGrid into the new one.
-     * reset the patchID for each of the merged patchPoints
-     *
-     * @param mergedPatchGrid the other patch grid to be add to this one.
-     */
-
-    public void mergePatchGrid(StsPatchGrid mergedPatchGrid, StsPatchConnection newConnection)
-    {
-        if(debugPatchID != -1 && (id == debugPatchID || mergedPatchGrid.id == debugPatchID))
+        // check for any overlap between this grid and patchPointGrid
+        RowColGrid intersectGrid = patchGrid1.rowColGridIntersect(patchGrid2);
+        int r1 = intersectGrid.rowMin - patchGrid1.rowMin;
+        int r2 = intersectGrid.rowMin - patchGrid2.rowMin;
+        int c1 = intersectGrid.colMin - patchGrid1.colMin;
+        int c2 = intersectGrid.colMin - patchGrid2.colMin;
+        for(int row = 0; row < intersectGrid.nRows; row++, r1++, r2++)
         {
-            if(mergedPatchGrid.id == debugPatchID)
+            int cc1 = c1;
+            int cc2 = c2;
+            for (int col = 0; col < intersectGrid.nCols; col++, cc1++, cc2++)
             {
-                StsException.systemDebug(this, "mergePatchGrid", "merged patch " + mergedPatchGrid.toString() + " into patch" + toString() + " will remove patch: " + mergedPatchGrid.id + "\n" +
-                    "     Switching debugPatchID to new patch: " + id);
-                debugPatchID = id;
+                if(patchGrid1.patchPoints[r1][cc1] != null && patchGrid2.patchPoints[r2][cc2] != null)
+                    return false;
             }
-            else
-                StsException.systemDebug(this, "mergePatchGrid", "merged patch " + mergedPatchGrid.toString() + " into patch" + toString() + " will remove patch: " + mergedPatchGrid.id);
         }
- 
-        for (StsPatchConnection connection : mergedPatchGrid.connectionsList)
-            addInitialPatchConnection(connection);
-        addInitialPatchConnection(newConnection);
-        mergedPatchGrid.clear();
+        return true;
+    }
+
+    /** We wish to merge the points from removedGrid into this one.  Copy both sets of points to a new grid which is union of two.
+     *  reset the removedGrid patchPoints.id to this id
+     * @param removedGrid  newPatchGrid to be merged to this (otherPatchGrid).
+     * @return true if merged successfully
+     */
+    boolean mergePatchPoints(StsPatchGrid removedGrid)
+    {
+        if(debug && (id == debugPatchID || removedGrid.id == debugPatchID))
+            StsException.systemDebug(this, "mergePatchPoints", "merging patch id: " + removedGrid.id + " to patch id: " + id);
+
+        RowColGrid union = rowColGridUnion(removedGrid); //union of this and newPatchGrid
+        StsPatchPoint[][] newMergedPatchPoints = new StsPatchPoint[union.nRows][union.nCols]; // create empty mergedPoints grid
+        if(!copyPatchPointsTo(newMergedPatchPoints, union)) return false; // copy this patchPoints to mergedPoints
+        if(!removedGrid.copyPatchPointsTo(newMergedPatchPoints, union)) return false;
+        removedGrid.resetPatchPointsGrid(this);
+        resetPatchPoints(union, newMergedPatchPoints);
+        nPatchPoints += removedGrid.nPatchPoints;
+        if(debugPatchID != -1 && removedGrid.id == debugPatchID)
+            debugPatchID = id;
+        return true;
+    }
+
+    /** this patchGrid is being merged to another patchGrid with this ID. Reset all the merged patchPoints to this id.
+     *
+     * @param newPatchGrid patch which this patch is being merged into
+     */
+    private void resetPatchPointsGrid(StsPatchGrid newPatchGrid)
+    {
+        for(int row = 0; row < nRows; row++)
+            for(int col = 0; col < nCols; col++)
+                if(patchPoints[row][col] != null) patchPoints[row][col].setPatchGrid(newPatchGrid);
+    }
+
+    RowColGrid rowColGridIntersect(StsPatchGrid otherGrid)
+    {
+        int rowMin, rowMax, colMin, colMax;
+        rowMin = Math.max(this.rowMin, otherGrid.rowMin);
+        rowMax = Math.min(this.rowMax, otherGrid.rowMax);
+        colMin = Math.max(this.colMin, otherGrid.colMin);
+        colMax = Math.min(this.colMax, otherGrid.colMax);
+        return new RowColGrid(rowMin, rowMax, colMin, colMax);
+    }
+
+    RowColGrid rowColGridUnion(StsPatchGrid otherGrid)
+    {
+        int rowMin, rowMax, colMin, colMax;
+        rowMin = Math.min(this.rowMin, otherGrid.rowMin);
+        rowMax = Math.max(this.rowMax, otherGrid.rowMax);
+        colMin = Math.min(this.colMin, otherGrid.colMin);
+        colMax = Math.max(this.colMax, otherGrid.colMax);
+        return new RowColGrid(rowMin, rowMax, colMin, colMax);
+    }
+
+    private RowColGrid getRowColGrid()
+    {
+        return new RowColGrid(rowMin, rowMax, colMin, colMax);
+    }
+
+    class RowColGrid
+    {
+        int rowMin = largeInt;
+        int rowMax = -largeInt;
+        int colMin = largeInt;
+        int colMax = -largeInt;
+        int nRows = 0, nCols = 0;
+
+        RowColGrid(int rowMin, int rowMax, int colMin, int colMax)
+        {
+            this.rowMin = rowMin;
+            this.rowMax = rowMax;
+            this.colMin = colMin;
+            this.colMax = colMax;
+            nRows = rowMax - rowMin + 1;
+            nCols = colMax - colMin + 1;
+        }
+
+        public String toString()
+        {
+            return new String("rowMin: " + rowMin + " rowMax: " + rowMax + " colMin: " + colMin + " colMax: " + colMax);
+        }
+    }
+
+    boolean patchPointOverlaps(StsPatchPoint patchPoint)
+    {
+        try
+        {
+            if (!contains(patchPoint)) return false;
+            return getPatchPoint(patchPoint.row, patchPoint.col) != null;
+
+        }
+        catch(Exception e)
+        {
+            StsException.outputWarningException(this, "patchPointOverlaps", "Failed for point: " + patchPoint.toString() +
+                    " on grid: " + toString(), e);
+            return false;
+        }
+    }
+
+    void addPatchPoint(StsPatchPoint patchPoint)
+    {
+        if(debug && id == debugPatchID)
+        //       if(debug && id == debugPatchID && debugPointRow == patchPoint.row && debugPointCol == patchPoint.col)
+            StsException.systemDebug(this, "addPatchPoint", " patchPoint " + patchPoint.toString());
+
+        if(patchPoints == null)
+            initializePatchPoints(patchPoint);
+        else
+            checkAdjustGrid(patchPoint);
+        if(!contains(patchPoint))
+        {
+            StsException.systemError(this, "addPatchPoint", "pointGrid " + rowColGrid.toString() + " doesn't contain point " + patchPoint.toString());
+            return;
+        }
+        patchPoints[patchPoint.row - rowMin][patchPoint.col - colMin] = patchPoint;
+        patchPoint.setPatchGrid(this);
+        nPatchPoints++;
+    }
+
+    void checkAdjustGrid(StsPatchPoint patchPoint)
+    {
+        int row = patchPoint.row;
+        int col = patchPoint.col;
+
+        int rowMinNew = rowMin, rowMaxNew = rowMax, colMinNew = colMin, colMaxNew = colMax;
+
+        boolean gridChanged = false;
+        if (row < this.rowMin)
+        {
+            rowMinNew = row;
+            gridChanged = true;
+        }
+        if (row > this.rowMax)
+        {
+            rowMaxNew = row;
+            gridChanged = true;
+        }
+        if (col < this.colMin)
+        {
+            colMinNew = col;
+            gridChanged = true;
+        }
+        if (col > this.colMax)
+        {
+            colMaxNew = col;
+            gridChanged = true;
+        }
+
+        if (!gridChanged) return;
+
+        RowColGrid newRowColGrid = new RowColGrid(rowMinNew, rowMaxNew, colMinNew, colMaxNew);
+        copyResetRowColGrid(newRowColGrid);
+    }
+
+    void copyResetRowColGrid(RowColGrid newRowColGrid)
+    {
+        if(debug && debugPatchID != -1 && id == debugPatchID)
+            StsException.systemDebug(this, "copyResetRowColGrid", "grid reset from " + rowColGrid + " to " + newRowColGrid);
+        StsPatchPoint[][] newPatchPoints = copyPatchPoints(newRowColGrid);
+        resetPatchPoints(newRowColGrid, newPatchPoints);
+    }
+
+    StsPatchPoint[][] copyPatchPoints(RowColGrid newRowColGrid)
+    {
+        if (patchPoints == null) return null;
+        StsPatchPoint[][] newPatchPoints = new StsPatchPoint[newRowColGrid.nRows][newRowColGrid.nCols];
+        if(!copyPatchPointsTo(newPatchPoints, newRowColGrid))
+            return null;
+        else
+            return newPatchPoints;
+    }
+
+    boolean copyPatchPointsTo(StsPatchPoint[][] newPatchPoints, RowColGrid newRowColGrid)
+    {
+        int row = -1, newRow = -1;
+        int col = -1, newCol = -1;
+        try
+        {
+            int rowStart = rowMin - newRowColGrid.rowMin;
+            int colStart = colMin - newRowColGrid.colMin;
+            for (row = 0, newRow = rowStart; row < nRows; row++, newRow++)
+                for(col = 0, newCol = colStart; col < nCols; col++, newCol++)
+                {
+                    if(patchPoints[row][col] != null)
+                    {
+                        if(newPatchPoints[newRow][newCol] != null)
+                            StsException.systemError(this, "copyPatchPointsTo", "Failed copying patch " + rowColGrid.toString() +
+                                    " row: " + row + " col: " + col + " to new grid " + newRowColGrid.toString() +
+                                     "row: " + newRow + "col: " + newCol);
+                        else
+                            newPatchPoints[newRow][newCol] = patchPoints[row][col];
+                    }
+                }
+            return true;
+        }
+        catch(Exception e)
+        {
+            StsException.outputWarningException(this, "copyPatchPointsTo", "Failed copying patch " + rowColGrid.toString() + " row: " + row +
+                " to new grid " + newRowColGrid.toString() + "row: " + newRow, e);
+            return false;
+        }
+    }
+
+    void resetPatchPoints(RowColGrid newRowColGrid, StsPatchPoint[][] newPatchPoints)
+    {
+        initializeRowColGrid(newRowColGrid);
+        patchPoints = newPatchPoints;
+    }
+
+    boolean contains(RowColGrid newRowColGrid)
+    {
+        return newRowColGrid.rowMin >= rowMin && newRowColGrid.rowMax <= rowMax &&
+                newRowColGrid.colMin >= colMin && newRowColGrid.colMax <= colMax;
+    }
+
+    boolean contains(StsPatchPoint patchPoint)
+    {
+        int row = patchPoint.row;
+        int col = patchPoint.col;
+        return row >= rowMin && row <= rowMax && col >= colMin && col <= colMax;
+    }
+
+    private void initializePatchPoints(StsPatchPoint patchPoint)
+    {
+        initializeRowColGrid(patchPoint);
+        patchPoints = new StsPatchPoint[nRows][nCols];
+    }
+
+    /** Called to add a point which doesn't belong to a grid to this patchGrid as long as it doesn't overlap.
+     *  If it does overlap, create a new patchGrid and add this point and clone of connectedPatchPoint which
+     *  belongs to this grid.
+     */
+    public StsPatchGrid checkAddPatchPoint(StsPatchPoint patchPoint, StsPatchPoint connectedPatchPoint)
+    {
+        if(patchPointOverlaps(patchPoint))
+        {
+            StsPatchGrid newPatchGrid = StsPatchGrid.construct(patchVolume, patchType);
+            newPatchGrid.addPatchPoint(patchPoint);
+            newPatchGrid.addPatchPoint(connectedPatchPoint.clone());
+            return newPatchGrid;
+        }
+        else
+        {
+            addPatchPoint(patchPoint);
+            return this;
+        }
+    }
+
+    public final void addCorrelation(StsPatchPoint otherPatchPoint, StsPatchPoint newPatchPoint, float correl)
+    {
+        if (otherPatchPoint.row == newPatchPoint.row)
+            addRowCorrelation(otherPatchPoint,  newPatchPoint, correl);
+        else
+            addColCorrelation(otherPatchPoint,  newPatchPoint, correl);
+    }
+
+    public final void addRowCorrelation(StsPatchPoint otherPatchPoint, StsPatchPoint newPatchPoint, float correl)
+    {
+        if(debug)
+        {
+            if(otherPatchPoint.z == nullValue)
+                StsException.systemError(this, "addRowCorrelation", "Has row correl at row: " + otherPatchPoint.row +
+                " col: " + otherPatchPoint.col + " but first point is null.");
+            if(newPatchPoint.z == nullValue)
+                StsException.systemError(this, "addRowCorrelation", "Has row correl at row: " + otherPatchPoint.row +
+                        " col: " + otherPatchPoint.col + " but second point is null.");
+        }
+        otherPatchPoint.rowCorrel = correl;
+    }
+
+    public final void addColCorrelation(StsPatchPoint otherPatchPoint, StsPatchPoint newPatchPoint, float correl)
+    {
+        if(debug)
+        {
+            if(otherPatchPoint.z == nullValue)
+                StsException.systemError(this, "addColCorrelation", "Has col correl at row: " + otherPatchPoint.row +
+                        " col: " + otherPatchPoint.col + " but first point is null.");
+            if(newPatchPoint.z == nullValue)
+                StsException.systemError(this, "addColCorrelation", "Has col correl at row: " + otherPatchPoint.row +
+                        " col: " + otherPatchPoint.col + " but second point is null.");
+        }
+        otherPatchPoint.colCorrel = correl;
     }
 
     public void clear()
     {
+        initializeRowColGrid();
         patchPoints = null;
         if(debugPatchID != -1 && id == debugPatchID)
+        //if(debug())
             StsException.systemDebug(this, "clear", "clearing patch: " + toString());
+    }
+
+    private void initializeRowColGrid()
+    {
+        initializeRowColGrid(largeInt, -largeInt, largeInt, -largeInt);
+    }
+
+    private void initializeRowColGrid(int rowMin, int rowMax, int colMin, int colMax)
+    {
+        initializeRowColGrid(new RowColGrid(rowMin, rowMax, colMin, colMax));
+    }
+
+    private void initializeRowColGrid(StsPatchPoint patchPoint)
+    {
+        int row = patchPoint.row;
+        int col = patchPoint.col;
+        initializeRowColGrid(row, row, col, col);
+    }
+
+    private void initializeRowColGrid(RowColGrid newRowColGrid)
+    {
+        if(debugPatchID != -1 && id == debugPatchID)
+            //if(debug())
+            StsException.systemDebug(this, "initializeRowColGrid", "Reset rowColGrid from " + rowColGrid + " to " + newRowColGrid);
+        rowMin = newRowColGrid.rowMin;
+        rowMax = newRowColGrid.rowMax;
+        colMin = newRowColGrid.colMin;
+        colMax = newRowColGrid.colMax;
+        nRows = rowMax - rowMin + 1;
+        nCols = colMax - colMin + 1;
+        this.rowColGrid = newRowColGrid;
     }
 
     boolean isDisconnected(int row)
@@ -234,400 +499,49 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
         return nPatchPoints < minNPoints;
     }
 
-    public void initializeGrid()
-    {
-        StsPatchPoint point;
-
-        nRows = rowMax - rowMin + 1;
-        nCols = colMax - colMin + 1;
-        boolean[][] hasPoint = new boolean[nRows][nCols];
-        for (StsPatchConnection connection : connectionsList)
-        {
-            point = connection.otherPoint;
-            hasPoint[point.row - rowMin][point.col - colMin] = true;
-            point = connection.newPoint;
-            hasPoint[point.row - rowMin][point.col - colMin] = true;
-        }
-        nPatchPoints = 0;
-        for(int row = 0; row < nRows; row++)
-            for(int col = 0; col < nCols; col++)
-                if(hasPoint[row][col]) nPatchPoints++;
-    }
-
     public void resetIndex(int index)
     {
         if(debugPatchID != -1 && id == debugPatchID)
+            //if(debug())
             StsException.systemDebug(this, "resetIndex", "debugPatch final ID being reset from " + idFinal + " to " + index);
         idFinal = index;
+    /*
         for(int row = 0; row < nRows; row++)
             for(int col = 0; col < nCols; col++)
                 if(patchPoints[row][col] != null)
                     patchPoints[row][col].patchID = idFinal;
+    */
     }
 
-    /* This patch contains a connection list where a connection is between a newPoint and the otherPoint.
-     * Sort all the connections into a series of sheets where the first sheet contains all first connections,
-     *  second sheet has second connections, etc. Each sheet is sorted into row-col order.
-     *  All connections within a sheet may not be actually interconnected, so now extract a set of layers
-     *  from each sheet where all connections within a layer are interconnected.  Some connections in a sheet
-     *  may in fact belong to a layer initially constructed from a previous sheet.
-     *  Make successive passes thru the connections assigning all connections which connect to each other
-     *  to a layer.  Add this new layer to the gridList.
-     *  For each layer, compute the patchPoints array from the connections and delete the connections.
-     * @param gridList
-     */
-    void constructGridArray(ArrayList<StsPatchGrid> gridList)
+    public void finish()
     {
-        if(debugPatchID != -1 && id == debugPatchID)
-            StsException.systemDebug(this, "constructGridArray", "patch: " + id);
-        patchVolume.nParentGrids++;
-
-        maxGridSize = StsMath.max3(maxGridSize, nRows, nCols);
-
-        try
+        if(debug && id == debugPatchID)
+            StsException.systemDebug(this, "finish", "for patch " + toString());
+        pointsZ = new float[nRows][nCols];
+        rowCorrels = new float[nRows][nCols];
+        colCorrels = new float[nRows][nCols];
+        for (int row = 0; row < nRows; row++)
         {
-            // first make a sorted list by row, column, and z
-            Collections.sort(connectionsList);
-            // assign a sheet number for debugging purposes
-            setTraceOrder();
-            // clear the patchID numbers from all the patchPoints
-            clearPatchPointIDs();
-            // local array of patchGrids built from this multilayered patchGrid
-            ArrayList<StsPatchGrid> layerGrids = new ArrayList<>();
-            int parentID = id;
-            StsPatchConnection[] connections = connectionsList.toArray(new StsPatchConnection[0]);
-            StsPatchConnection[] pointConnections;
-            int nConnections = connections.length;
-            StsPatchConnection connection, nextConnection = null;
-            // get the connection and the nextConnection (the one after that)
-            // if both from same point, increment counter and add both connections using patchID info
-            // otherwise just add the one connection
-            for(int n = 0; n < nConnections; n++)
+            for (int col = 0; col < nCols; col++)
             {
-                StsPatchGrid layerGrid;
-
-                connection = connections[n];
-
-                if(n+1 < nConnections)
-                    nextConnection = connections[n+1];
+                if (patchPoints[row][col] != null)
+                {
+                    float z = patchPoints[row][col].z;
+                    pointsZ[row][col] = z;
+                    zMin = Math.min(zMin, z);
+                    zMax = Math.max(zMax, z);
+                    rowCorrels[row][col] = patchPoints[row][col].rowCorrel;
+                    colCorrels[row][col] = patchPoints[row][col].colCorrel;
+                }
                 else
-                    nextConnection = null;
-
-                if(nextConnection != null)
                 {
-                    if (connection.newPoint != nextConnection.newPoint)
-                        nextConnection = null;
-                }
-                if(nextConnection == null)
-                {
-                    int id = connection.otherPoint.patchID;
-                    StsPatchPoint newPoint = connection.newPoint;
-                    if(id == -1) // connection has no associated layer; create one and add both points to it
-                    {
-                        layerGrid = StsPatchGrid.constructFinal(patchVolume, patchType, parentID, rowMin, rowMax, colMin, colMax);
-                        layerGrids.add(layerGrid);
-                        layerGrid.addPoint(connection.otherPoint, true);
-                        layerGrid.addPoint(newPoint, true);
-                        connection.addCorrelation();
-                    }
-                    else // connection belongs to existing layer; add newPoint to it
-                    {
-                        layerGrid = getLayerGrid(layerGrids, id);
-                        layerGrid.addPoint(layerGrid, layerGrids, newPoint, parentID);
-                        connection.addCorrelation();
-                    }
-                }
-                else // nextConnection != null :  we have two connections to the same newPoint
-                {
-                    n++;
-                    StsPatchPoint newPoint = connection.newPoint;  // connection2 is and must be connected to the same point
-                    int id1 = connection.otherPoint.patchID;
-                    int id2 = nextConnection.otherPoint.patchID;
-                    StsPatchGrid layerGrid1, layerGrid2;
-
-                    if(id1 == id2) // both connected points belong to same grid or both to no grid
-                    {
-                        if(id1 == -1) // need to add all 3 points to a new layer
-                        {
-                            layerGrid2 = StsPatchGrid.constructFinal(patchVolume, patchType, parentID, rowMin, rowMax, colMin, colMax);
-                            layerGrids.add(layerGrid2);
-                            addPoint(layerGrid2, layerGrids, connection.otherPoint, parentID);
-                            connection.addCorrelation();
-                            addPoint(layerGrid2, layerGrids, nextConnection.otherPoint, parentID);
-                            nextConnection.addCorrelation();
-                            addPoint(layerGrid2, layerGrids, newPoint, parentID);
-                        }
-                        else // both otherPoints belong to the same grid: add newPoint to it
-                        {
-                            layerGrid = getLayerGrid(layerGrids, id1);
-                            addPoint(layerGrid, layerGrids, newPoint, parentID);
-                            connection.addCorrelation();
-                            nextConnection.addCorrelation();
-                        }
-                    }
-                    else if(id1 == -1)  // id2 != -1 : nextConnection.otherPoint belongs to a layerGrid2; add the other 2 points to it
-                    {
-                        layerGrid2 = getLayerGrid(layerGrids, id2);
-                        addPoint(layerGrid2, layerGrids, connection.otherPoint, parentID);
-                        connection.addCorrelation();
-                        nextConnection.addCorrelation();
-                        addPoint(layerGrid2, layerGrids, newPoint, parentID);
-                    }
-                    else if(id2 == -1) // connection.otherPoint belongs to a layer; add the other 2 points to it
-                    {
-                        layerGrid1 = getLayerGrid(layerGrids, id1);
-                        addPoint(layerGrid1, layerGrids, nextConnection.otherPoint, parentID);
-                        connection.addCorrelation();
-                        nextConnection.addCorrelation();
-                        addPoint(layerGrid1, layerGrids, newPoint, parentID);
-                    }
-                    else // connections are to two different layerGrids; merge if they don't overlap; otherwise clone point and add to the second grid
-                    {
-                        layerGrid1 = getLayerGrid(layerGrids, id1);
-                        layerGrid2 = getLayerGrid(layerGrids, id2);
-                        // If newPoint overlaps point in one of the two grids, add it to the other and don't merge grids; clone connected point from overlapped grid
-                        // and add it to the non-overlapped grid.
-                        // If newPoint doesn't overlap either grid and the two grids don't overlap, we can merge the two grids; add the newPoint to one and merge them.
-                        // If newPoint overlaps both grids, then we need to make a new grid containing just this point with clones of the two connected otherPoints.
-
-                        // overlap flag indicates whether there the newPoint overlaps zero grids (0), layerGrid1 only (1), layerGrid2 only (2), or both (3)
-                        int overlapFlag = pointOverlapsGrid(newPoint, layerGrid1, layerGrid2);
-                        if(overlapFlag == 0) // newPoint doesn't overlap either grid: try to merge
-                        {
-                            if(mergeGrids(layerGrid1, layerGrid2, layerGrids))
-                            {
-                                connection.addCorrelation();
-                                addPoint(layerGrid1, layerGrids, newPoint, parentID);
-                                nextConnection.addCorrelation();
-                            }
-                            else // can't merge, arbitrarily add newPoint to layerGrid1; clone connected point in layerGrid2 and add to layerGrid1 also
-                            {
-                                connection.addCorrelation();
-                                addPoint(layerGrid1, layerGrids, newPoint, parentID);
-                                nextConnection.otherPoint = nextConnection.otherPoint.cloneClearCorrels();
-                                nextConnection.addCorrelation();
-                                addPoint(layerGrid1, layerGrids, nextConnection.otherPoint, parentID);
-                            }
-                        }
-                        else if(overlapFlag == 1) // newPoint overlaps layerGrid1, so add it to layerGrid2 and clone layerGrid1 connected point and add to layerGrid2
-                        {
-                            nextConnection.addCorrelation();
-                            addPoint(layerGrid2, layerGrids, newPoint, parentID);
-                            connection.otherPoint = connection.otherPoint.cloneClearCorrels();
-                            connection.addCorrelation();
-                            addPoint(layerGrid2, layerGrids, connection.otherPoint, parentID);
-                        }
-                        else if(overlapFlag == 2) // newPoint overlaps layerGrid2, so add it to layerGrid1 and clone layerGrid2 connected point and add to layerGrid1
-                        {
-                            connection.addCorrelation();
-                            addPoint(layerGrid1, layerGrids, newPoint, parentID);
-                            nextConnection.otherPoint = nextConnection.otherPoint.cloneClearCorrels();
-                            nextConnection.addCorrelation();
-                            addPoint(layerGrid1, layerGrids, nextConnection.otherPoint, parentID);
-                        }
-                        else // overlapFlag == 3 : newPoint overlaps both grids, so create new layerGrid, and newPoint and cloned otherPoints to new layerGrid
-                        {
-                            layerGrid = StsPatchGrid.constructFinal(patchVolume, patchType, parentID, rowMin, rowMax, colMin, colMax);
-                            layerGrids.add(layerGrid);
-                            addPoint(layerGrid, layerGrids, newPoint, parentID);
-                            connection.otherPoint = connection.otherPoint.cloneClearCorrels();
-                            connection.addCorrelation();
-                            addPoint(layerGrid, layerGrids, connection.otherPoint, parentID);
-                            nextConnection.otherPoint = nextConnection.otherPoint.cloneClearCorrels();
-                            nextConnection.addCorrelation();
-                            addPoint(layerGrid, layerGrids, nextConnection.otherPoint, parentID);
-                        }
-                    }
+                    pointsZ[row][col] = nullValue;
+                    rowCorrels[row][col] = 0.0f;
+                    colCorrels[row][col] = 0.0f;
                 }
             }
-            connectionsList = null;
-
-            for(StsPatchGrid grid : layerGrids)
-            {
-                if(grid.nPatchPoints == 0) return;
-                grid.resize();
-                gridList.add(grid);
-                if(debugPatchID != -1 && id == debugPatchID)
-                    StsException.systemDebug(this, "constructGridArray", "patchID" + id + " layer patch id " + grid.idFinal);
-            }
-            if(debug) StsException.systemDebug(this, "constructGridArray", "Constructed " + layerGrids.size() + " new patch grids from " + nSheets + " sheets.");
         }
-        catch(Exception e)
-        {
-            StsException.outputWarningException(this, "constructGridArray", toString(), e);
-        }
-    }
-
-    private int pointOverlapsGrid(StsPatchPoint newPoint, StsPatchGrid layerGrid1, StsPatchGrid layerGrid2)
-    {
-        int row = newPoint.row - rowMin;
-        int col = newPoint.col - colMin;
-        StsPatchPoint patchPoint1 = layerGrid1.patchPoints[row][col];
-        StsPatchPoint patchPoint2 = layerGrid2.patchPoints[row][col];
-        if(patchPoint1 == null)
-        {
-            if(patchPoint2 == null)
-                return 0;
-            else
-                return 2;
-        }
-        else if(patchPoint2 == null) // patchPoint1 != null
-        {
-            return 1;
-        }
-        else // patchPoint1 != null && patchPoint2 != nul
-            return 3;
-    }
-
-    /** if both grids have points at the same location which aren't the same, then we can't merge.
-     *  If we can merge, then add the points from the second grid to the first, add the new connection, and remove the second grid
-     * @param layerGrid1 first new child grid
-     * @param layerGrid2 second new child grid
-     * @param layerGrids the set of child grids being built from the parent grid
-     * @return
-     */
-    private boolean mergeGrids(StsPatchGrid layerGrid1, StsPatchGrid layerGrid2, ArrayList<StsPatchGrid> layerGrids)
-    {
-        for(int row = 0; row < nRows; row++)
-            for(int col = 0; col < nCols; col++)
-            {
-                StsPatchPoint patchPoint1 = layerGrid1.patchPoints[row][col];
-                StsPatchPoint patchPoint2 = layerGrid2.patchPoints[row][col];
-                if(patchPoint1 != null && patchPoint2 != null && patchPoint1 != patchPoint2) return false;
-            }
-       for(int row = 0; row < nRows; row++)
-            for(int col = 0; col < nCols; col++)
-            {
-                StsPatchPoint patchPoint1 = layerGrid1.patchPoints[row][col];
-                StsPatchPoint patchPoint2 = layerGrid2.patchPoints[row][col];
-                if(patchPoint2 != null)
-                {
-                    patchPoint2.patchID = layerGrid1.idFinal;
-                    if(patchPoint1 != null)
-                        mergePatchPoints(patchPoint1, patchPoint2);
-                    else
-                        layerGrid1.patchPoints[row][col] = patchPoint2;
-                }
-            }
-        layerGrids.remove(layerGrid2);
-        return true;
-    }
-
-    private void mergePatchPoints(StsPatchPoint patchPoint1, StsPatchPoint patchPoint2)
-    {
-        if(patchPoint2.rowCorrel != 0.0f)
-            patchPoint1.rowCorrel = patchPoint2.rowCorrel;
-        if(patchPoint2.colCorrel != 0.0f)
-            patchPoint1.colCorrel = patchPoint2.colCorrel;
-    }
-
-    private boolean addPoint(StsPatchGrid layerGrid, ArrayList<StsPatchGrid> layerGrids, StsPatchPoint point, int parentID)
-    {
-        if(layerGrid.addPoint(point, false))
-            return true;
-        layerGrid = StsPatchGrid.constructFinal(patchVolume, patchType, parentID, rowMin, rowMax, colMin, colMax);
-        layerGrids.add(layerGrid);
-        return layerGrid.addPoint(point, false);
-    }
-
-    private boolean addPoint(StsPatchPoint point, boolean check)
-    {
-        nPatchPoints++;
-        StsPatchPoint currentPoint = patchPoints[point.row-rowMin][point.col-colMin];
-        if(currentPoint != null)
-        {
-            if(check)
-                StsException.systemError(this, "addPoint", "Failed. Point already exists:  " + currentPoint.toString());
-            return false;
-        }
-        patchPoints[point.row-rowMin][point.col-colMin] = point;
-        point.patchID = idFinal;
-        return true;
-    }
-
-    private void resize()
-    {
-        int newRowMin, newRowMax, newColMin, newColMax;
-        for(newRowMin = rowMin; newRowMin <= rowMax; newRowMin++)
-            if(rowHasNonNull(newRowMin)) break;
-        for(newRowMax = rowMax; newRowMax >= rowMin; newRowMax--)
-            if(rowHasNonNull(newRowMax)) break;
-        for(newColMin = colMin; newColMin <= colMax; newColMin++)
-            if(colHasNonNull(newColMin)) break;
-        for(newColMax = colMax; newColMax >= colMin; newColMax--)
-            if(colHasNonNull(newColMax)) break;
-        nRows = newRowMax - newRowMin + 1;
-        nCols = newColMax - newColMin + 1;
-        StsPatchPoint[][] newPatchPoints = new StsPatchPoint[nRows][nCols];
-        try
-        {
-            for(int row = newRowMin; row <= newRowMax; row++)
-            {
-                StsPatchPoint[] rowPoints = new StsPatchPoint[nCols];
-                System.arraycopy(patchPoints[row-rowMin], newColMin-colMin, rowPoints, 0, nCols);
-                newPatchPoints[row-newRowMin] = rowPoints;
-            }
-        }
-        catch(Exception e)
-        {
-            StsException.systemError(this, "resize");
-            return;
-        }
-        rowMin = newRowMin;
-        rowMax = newRowMax;
-        colMin = newColMin;
-        colMax = newColMax;
-        patchPoints = newPatchPoints;
-    }
-
-    private boolean rowHasNonNull(int row)
-    {
-        for(int col = colMin; col <= colMax; col++)
-            if(patchPoints[row-rowMin][col-colMin] != null) return true;
-        return false;
-    }
-
-    private boolean colHasNonNull(int col)
-    {
-        for(int row = rowMin; row <= rowMax; row++)
-            if(patchPoints[row-rowMin][col-colMin] != null) return true;
-        return false;
-    }
-
-    private void addOtherPoint(StsPatchConnection connection)
-    {
-        addPoint(connection.otherPoint, true);
-        connection.addCorrelation();
-    }
-
-    private StsPatchGrid getLayerGrid(ArrayList<StsPatchGrid> layerGrids, int id)
-        {
-            for(StsPatchGrid layerGrid : layerGrids)
-                if(layerGrid.idFinal == id) return layerGrid;
-            StsException.systemError(this, "getLayerGrid", "Failed to find layerGrid for id " + id);
-            return null;
-        }
-
-    private void setTraceOrder()
-    {
-        int nSheet = 0;
-        nSheets = 0;
-        StsPatchConnection nextConnection = null;
-        for(StsPatchConnection connection : connectionsList)
-        {
-            StsPatchConnection prevConnection = nextConnection;
-            nextConnection = connection;
-            if(!nextConnection.sameRowCol(prevConnection))
-                nSheet = 0;
-            connection.nSheet = nSheet++;
-            nSheets = Math.max(nSheets, nSheet);
-        }
-    }
-
-    private void clearPatchPointIDs()
-    {
-        for(StsPatchConnection connection : connectionsList)
-            connection.clearPointPatchIDs();
+        if(!StsPatchVolume.debug) patchPoints = null;
     }
 
     /** get nearest patch whose z at this x,y is just above the z slice plane */
@@ -650,28 +564,6 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
             }
         }
         return dz;
-    }
-
-    static public void printOverlapPoints()
-    {
-        for(OverlapPoint overlapPoint : overlapPoints)
-            overlapPoint.print();
-    }
-    class OverlapPoint
-    {
-        int row, col, id;
-
-        OverlapPoint(int row, int col, int id)
-        {
-            this.row = row;
-            this.col = col;
-            this.id = id;
-        }
-
-        void print()
-        {
-            System.out.println("patchPoint overlap at row: " + row + " col: " + col + " id: " + id);
-        }
     }
 
     /** sort first by rowMin and then by colMin. Return 1 if this rowMin&colMin come after other; 0 if equal; -1 otherwise */
@@ -697,23 +589,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
         }
     }
 
-    public float[][] getPointsZ() 
-    {
-        if(pointsZ != null) return pointsZ;
-        pointsZ = new float[nRows][nCols];
-        for(int row = 0; row < nRows; row++)
-        {
-            for(int col = 0; col < nCols; col++)
-            {               
-                StsPatchPoint patchPoint = patchPoints[row][col];
-                if(patchPoint == null)
-                    pointsZ[row][col] = nullValue;
-                else
-                    pointsZ[row][col] = patchPoints[row][col].z;
-            }
-        }
-        return pointsZ;
-    }
+    public float[][] getPointsZ() { return pointsZ; }
 
     public int getGridSize() { return nRows*nCols; }
 
@@ -726,7 +602,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
             int colStart = 0, colEnd = nCols - 1;
             for (int col = 0; col < nCols; col++)
             {
-                if (patchPoints[row][col] != null)
+                if (pointsZ[row][col] != nullValue)
                 {
                     colStart = col;
                     break;
@@ -734,7 +610,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
             }
             for (int col = nCols - 1; col > 0; col--)
             {
-                if (patchPoints[row][col] != null)
+                if (pointsZ[row][col] != nullValue)
                 {
                     colEnd = col;
                     break;
@@ -742,7 +618,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
             }
 
             for(int col = colStart; col <= colEnd; col++)
-                if(patchPoints[row][col] != null) nActualUsed++;
+                if(pointsZ[row][col] != nullValue) nActualUsed++;
 
             nUsed += colEnd - colStart + 1;
         }
@@ -855,6 +731,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
     {
         boolean lineStarted = false;
         float z;
+        int col = -1;
 
         if(volumeRow < rowMin || volumeRow > rowMax) return;
         try
@@ -866,12 +743,11 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
             boolean displayCurvatureColor = (curvature != null && displayCurvature);
             if(!displayCurvatureColor)
                 StsTraceUtilities.getPointTypeColor(patchType).setGLColor(gl);
-            for (int col = 0; col < nCols; col++, x += xInc)
+            for (col = 0; col < nCols; col++, x += xInc)
             {
-                StsPatchPoint patchPoint = patchPoints[row][col];
-                if (patchPoint != null)
+                z = pointsZ[row][col];
+                if (z != nullValue)
                 {
-                    z = patchPoint.z;
                     if(displayCurvatureColor)
                     {
                         // StsTraceUtilities.getPointTypeColor(patchType).setGLColor(gl);
@@ -891,7 +767,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
                     else
                         gl.glVertex2f(x, z);
                     
-                    if(patchPoint.rowCorrel == 0.0f && lineStarted)
+                    if(rowCorrels[row][col] == 0.0f && lineStarted)
                     {
                         lineStarted = false;
                         gl.glEnd();
@@ -906,7 +782,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
         }
         catch(Exception e)
         {
-            StsException.outputWarningException(this, "drawRow", e);
+            StsException.outputWarningException(this, "drawRow", "Failed for patchGrid " + id + " at row: " + volumeRow + " col: " + col, e);
         }
         finally
         {
@@ -919,6 +795,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
     {
        boolean lineStarted = false;
        float z;
+       int row = -1;
 
         try
         {
@@ -929,12 +806,11 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
             boolean displayCurvatureColor = curvature != null && displayCurvature;
             if(!displayCurvatureColor)
                 StsTraceUtilities.getPointTypeColor(patchType).setGLColor(gl);
-            float zMin = patchVolume.zMin;
-            for (int row = 0; row < nRows; row++, y += yInc)
+            for (row = 0; row < nRows; row++, y += yInc)
             {
-                StsPatchPoint patchPoint = patchPoints[row][col];
+                z = getPointZ(row, col);
 
-                if (patchPoint != null && (z = patchPoint.z) != StsParameters.nullValue)
+                if (z != StsParameters.nullValue)
                 {
                     if(displayCurvatureColor)
                     {
@@ -954,7 +830,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
                     else
                         gl.glVertex2f(y, z);
 
-                    if(patchPoint.colCorrel == 0.0f && lineStarted)
+                    if(colCorrels[row][col] == 0.0f && lineStarted)
                     {
                         lineStarted = false;
                         gl.glEnd();
@@ -969,7 +845,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
         }
         catch(Exception e)
         {
-            StsException.outputWarningException(this, "drawRow", e);
+            StsException.outputWarningException(this, "drawCol", "Failed for patchGrid " + id + " at row: " + row + " col: " + volumeCol, e);
         }
         finally
         {
@@ -1260,18 +1136,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
     public String toString()
     {
         String rowColString = super.toString();
-        if (connectionsList != null)
-        {
-            if(connectionsList.size() > 0)
-            {
-                StsPatchConnection connection = connectionsList.get(0);
-                StsPatchPoint patchPoint = connection.newPoint;
-                return "id: " + id + " nConnections " + connectionsList.size() + " " + rowColString + " zFirst: " + patchPoint.value;
-            }
-            else
-                return "id: " + id + " " + rowColString + " no points";
-        }
-        else if (patchPoints != null)
+        if (patchPoints != null)
             return "id: " + id + " idFinal: " + idFinal + " nPatchPoints " + nPatchPoints + " " + rowColString + " zMin: " + zMin + " zMax: " + zMax;
         else
             return "id: " + id + " idFinal: " + idFinal + " nPatchPoints " + nPatchPoints + " " +  rowColString;
@@ -1308,17 +1173,17 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
     public float getAngle() { return patchVolume.getAngle(); }
     public float getXCoor(float rowF, float colF) { return patchVolume.getXCoor(rowF, colF); }
     public float getYCoor(float rowF, float colF) { return patchVolume.getYCoor(rowF, colF); }
-    public StsPoint getPoint(int row, int col)
+    public StsPoint getPoint(int volumeRow, int volumeCol)
     {
-        float[] xyz = getXYZorT(row, col);
+        float[] xyz = getXYZorT(volumeRow, volumeCol);
         return new StsPoint(xyz);
     }
 
-    public float[] getXYZorT(int row, int col)
+    public float[] getXYZorT(int volumeRow, int volumeCol)
     {
-        float[] xy = patchVolume.getXYCoors(row, col);
-        StsPatchPoint patchPoint = getPatchPoint(row, col);
-        float z = patchPoint.z;
+        float[] xy = patchVolume.getXYCoors(volumeRow, volumeCol);
+
+        float z = pointsZ[volumeRow - rowMin][volumeCol - colMin];
         return new float[] { xy[0], xy[1], z };
     }
 
@@ -1359,32 +1224,36 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
         return patchPoints[row-rowMin][col-colMin];
     }
 
-    public StsPatchPoint[] getRowPatchPoints(int volumeRow)
+    public float getPointZ(int patchRow, int patchCol)
     {
-        if(patchPoints == null) return null;
-        return patchPoints[volumeRow-rowMin];
+        if(pointsZ == null)
+            return nullValue;
+        if(!isInsidePatchRowCol(patchRow, patchCol))
+            return nullValue;
+        return pointsZ[patchRow][patchCol];
     }
 
-    public float getPointZ(int volumeRow, int volumeCol)
+    public boolean isInsidePatchRowCol(int row, int col)
     {
-        if(!isInsideRowCol(volumeRow, volumeCol)) return nullValue;
-        StsPatchPoint patchPoint = patchPoints[volumeRow-rowMin][volumeCol - colMin];
-        if(patchPoint == null) return nullValue;
-        return patchPoint.z;
+        return row >= 0 && row < nRows && col >= 0 && col < nCols;
     }
 
     public float getRowCorrel(int patchRow, int patchCol)
     {
-        StsPatchPoint patchPoint = patchPoints[patchRow][patchCol];
-        if(patchPoint == null) return 0.0f;
-        return patchPoint.rowCorrel;
+        if(rowCorrels == null)
+            return 0.0f;
+        if(!isInsidePatchRowCol(patchRow, patchCol))
+            return 0.0f;
+        return rowCorrels[patchRow][patchCol];
     }
 
     public float getColCorrel(int patchRow, int patchCol)
     {
-        StsPatchPoint patchPoint = patchPoints[patchRow][patchCol];
-        if(patchPoint == null) return 0.0f;
-        return patchPoint.colCorrel;
+        if(colCorrels == null)
+            return 0.0f;
+        if(!isInsidePatchRowCol(patchRow, patchCol))
+            return 0.0f;
+        return colCorrels[patchRow][patchCol];
     }
 
     public float getCurvature(int volumeRow, int volumeCol, float dataMin, float dataMax)

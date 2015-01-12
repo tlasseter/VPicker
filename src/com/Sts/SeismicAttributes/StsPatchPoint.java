@@ -17,7 +17,7 @@ public class StsPatchPoint extends StsSerialize implements StsSerializable, Comp
     public float value;
     public float z = StsParameters.nullValue;
     public byte pointType;
-    public int patchID = -1;
+    private StsPatchGrid patchGrid;
     public int row;
     public int col;
     public int slice;
@@ -73,6 +73,12 @@ public class StsPatchPoint extends StsSerialize implements StsSerializable, Comp
 
     public int getSlice() { return slice; }
 
+    public int getID()
+    {
+        if(patchGrid == null) return -1;
+        else return patchGrid.id;
+    }
+
     public int getIndex(int nVolumeCols)
     {
         return col + row*nVolumeCols;
@@ -80,7 +86,19 @@ public class StsPatchPoint extends StsSerialize implements StsSerializable, Comp
 
     public String toString()
     {
-        return "id: " + patchID + " row: " + row + " col: " + col + " slice: " + slice + " value: " + value +
-                " type: " + StsTraceUtilities.typeStrings[pointType];
+        int id = -1;
+        if(patchGrid != null) id = patchGrid.id;
+        return "id: " + id + " row: " + row + " col: " + col + " slice: " + slice + " value: " + value +
+                " z: " + z + " type: " + StsTraceUtilities.typeStrings[pointType];
+    }
+
+    public StsPatchGrid getPatchGrid()
+    {
+        return patchGrid;
+    }
+
+    public void setPatchGrid(StsPatchGrid patchGrid)
+    {
+        this.patchGrid = patchGrid;
     }
 }

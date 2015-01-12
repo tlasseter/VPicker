@@ -189,7 +189,7 @@ public class StsProject extends StsObject implements ActionListener, Serializabl
 
     transient private StsObjectPanel objectPanel = null;
 
-    static final boolean debug = true;
+    static final boolean debug = false;
 
     /** Number of XY Grid increments */
     static public int approxNumXYGridIncrements = 20;

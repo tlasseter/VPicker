@@ -3306,20 +3306,28 @@ public class StsMath
 
     public static final float[] addVectorsNormalize(float[] a, float[] b)
     {
-        if (b == null || a == null) return new float[3];
-        int length = Math.min(a.length, b.length);
-        float[] c = new float[length];
-        float sumSq = 0;
-        for (int n = 0; n < length; n++)
+        try
         {
-            c[n] = a[n] + b[n];
-            sumSq += c[n] * c[n];
+            if (b == null || a == null) return new float[3];
+            int length = Math.min(a.length, b.length);
+            float[] c = new float[length];
+            float sumSq = 0;
+            for (int n = 0; n < length; n++)
+            {
+                c[n] = a[n] + b[n];
+                sumSq += c[n] * c[n];
+            }
+            if (sumSq == 0.0f) return c;
+            float vectorLength = (float) Math.sqrt(sumSq);
+            for (int n = 0; n < length; n++)
+                c[n] /= vectorLength;
+            return c;
         }
-        if (sumSq == 0.0f) return c;
-        float vectorLength = (float) Math.sqrt(sumSq);
-        for (int n = 0; n < length; n++)
-            c[n] /= vectorLength;
-        return c;
+        catch(Exception e)
+        {
+            StsException.outputWarningException(StsMath.class, "addVectorsNormalize", e);
+            return null;
+        }
     }
 
     public static final float[] getAddVectors(float[] a, float[] b)
