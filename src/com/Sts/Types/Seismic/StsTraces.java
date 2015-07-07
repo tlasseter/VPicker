@@ -111,11 +111,13 @@ abstract public class StsTraces
     public void initializeDraw(StsView2d view2d, double horizScaleFactor, StsWiggleDisplayProperties wiggleProperties)
     {
         this.wiggleProperties = wiggleProperties;
-        float pixelsPerYunit = view2d.pixelsPerYunit;
+		// TODO FIX: should only have to do this when view changed or moved
+        view2d.computeVerticalPixelScaling();
+		float pixelsPerYunit = Math.abs(view2d.pixelsPerYunit);
         float[][] axisRanges = view2d.axisRanges;
         float[] displayZRange = StsTraceUtilities.getDisplayZRange(axisRanges, zInc);
         int[] sampleDisplayRange = StsTraceUtilities.getDisplayRange(boundingBox, displayZRange);
-        int pixelsPerInc = StsMath.ceiling(-pixelsPerYunit * zInc / 2);
+        int pixelsPerInc = StsMath.ceiling(pixelsPerYunit * zInc / 2);
         needsInterpolated = wiggleProperties.getWiggleSmoothCurve();
         if (pixelsPerInc <= 2) needsInterpolated = false;
         if(needsInterpolated && !isInterpolated)

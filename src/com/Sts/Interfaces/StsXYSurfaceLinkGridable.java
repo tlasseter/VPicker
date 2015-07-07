@@ -18,4 +18,14 @@ public interface StsXYSurfaceLinkGridable extends StsXYSurfaceGridable
 {
     public boolean hasRowLink(int row, int col);
     public boolean hasColLink(int row, int col);
+	public byte computeRowLink(int row, int col);
+	public byte computeColLink(int row, int col);
+
+	static final public byte LINK_NONE = 0;
+	static final public byte LINK_LINE = 1;
+	static final public byte LINK_ABOVE = 2;
+	static final public byte LINK_LEFT = 2;
+	static final public byte LINK_BELOW = 3;
+	static final public byte LINK_RIGHT = 3;
+	static final public byte LINK_BOTH = 4;
 }

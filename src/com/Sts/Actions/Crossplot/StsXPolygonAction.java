@@ -1083,7 +1083,7 @@ import java.awt.event.*;
              int nRows = nRowCols[0];
              int nCols = nRowCols[1];
 
-             float[][] cursorRange = seismicVolumes[0].getCursorDataRange(dirNo);
+             float[][] cursorRange = seismicVolumes[0].getCursorAxisRange(dirNo);
              offscreen = new StsGLOffscreenPolygon(nCols, nRows, cursorRange[0][0], cursorRange[0][1], cursorRange[1][0], cursorRange[1][1], false);
 
              int[] coorIndexes = StsSeismicVolume.getCursor2dCoorDataIndexes(dirNo, polygonAxesFlipped);

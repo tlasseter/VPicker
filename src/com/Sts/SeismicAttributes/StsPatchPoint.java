@@ -21,14 +21,21 @@ public class StsPatchPoint extends StsSerialize implements StsSerializable, Comp
     public int row;
     public int col;
     public int slice;
+    /** index of this point in the trace containing it */
+    public int traceIndex;
     public float rowCorrel;
     public float colCorrel;
+
+    /** first point above which has a connected patch */
+    public StsPatchPoint connectedPointAbove = null;
+    /** first point below which has a connected patch */
+    public StsPatchPoint connectedPointBelow = null;
 
     public StsPatchPoint()
     {
     }
 
-    public StsPatchPoint(int row, int col, int slice, float z, float value, byte pointType)
+    public StsPatchPoint(int row, int col, int slice, float z, float value, byte pointType, int traceIndex)
     {
         this.row = row;
         this.col = col;
@@ -36,6 +43,7 @@ public class StsPatchPoint extends StsSerialize implements StsSerializable, Comp
         this.z = z;
         this.value = value;
         this.pointType = pointType;
+        this.traceIndex = traceIndex;
     }
 
     public int compareTo(StsPatchPoint otherPoint)
@@ -88,8 +96,14 @@ public class StsPatchPoint extends StsSerialize implements StsSerializable, Comp
     {
         int id = -1;
         if(patchGrid != null) id = patchGrid.id;
-        return "id: " + id + " row: " + row + " col: " + col + " slice: " + slice + " value: " + value +
-                " z: " + z + " type: " + StsTraceUtilities.typeStrings[pointType];
+        return "id " + id + " r " + row + " c " + col + " s " + slice + " v " + value +
+                " i " + traceIndex + " z " + z + " t " + StsTraceUtilities.typeStrings[pointType];
+    }
+
+    public static String staticToString(String string, StsPatchPoint patchPoint)
+    {
+        if(patchPoint == null) return " " + string + " null";
+        else return " " + string + " " + patchPoint.toString();
     }
 
     public StsPatchGrid getPatchGrid()

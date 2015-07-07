@@ -29,7 +29,7 @@ public class StsVolumeCurvatureWizard extends StsWizard implements ActionListene
 
     public StsVolumeCurvatureWizard(StsActionManager actionManager)
     {
-        super(actionManager, 500, 650);
+        super(actionManager, 500, 900);
         addSteps
         (
             new StsWizardStep[]

@@ -35,7 +35,7 @@ public class StsParameters
     public static final double largeDouble = Double.MAX_VALUE;
     public static final float smallFloat = Float.MIN_VALUE;
 	public static final int largeInt = Integer.MAX_VALUE;
-    public static final int nullInteger = -Integer.MAX_VALUE;
+    public static final int nullInteger = Integer.MIN_VALUE;
     public static final double doubleNullValue = Double.MAX_VALUE;
     
     /**/

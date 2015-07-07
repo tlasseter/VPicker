@@ -3882,11 +3882,11 @@ public class StsProject extends StsObject implements ActionListener, Serializabl
     {
         if(debug)
         {
-            System.out.println("Current: zDomain " + getZDomainString(zDomain) + " zDomainSupported " +
-                    getZDomainString(zDomainSupported));
-            System.out.println("   Input: zDomainSupported " + getZDomainString(newZDomainSupported) +
+            System.out.println("Current: zDomain " + getStringForZDomain(zDomain) + " zDomainSupported " +
+                    getStringForZDomain(zDomainSupported));
+            System.out.println("   Input: zDomainSupported " + getStringForZDomain(newZDomainSupported) +
                     "   preferZDomain " +
-                    getZDomainString(preferZDomain));
+                    getStringForZDomain(preferZDomain));
         }
 
         boolean ok = true;
@@ -3934,7 +3934,7 @@ public class StsProject extends StsObject implements ActionListener, Serializabl
         return StsParameters.TD_ALL_STRINGS[zDomain];
     }
 
-    public String getZDomainString(byte zDomain)
+    public String getStringForZDomain(byte zDomain)
     {
         return StsParameters.TD_ALL_STRINGS[zDomain];
     }

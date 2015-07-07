@@ -145,7 +145,7 @@ public class StsViewCursor extends StsView2d implements StsSerializable
     {
         for(int n = 0; n < 3; n++)
         {
-            cursorAxisRanges[n] = model.getProject().getRotatedBoundingBox().getCursorDataRange(n);
+            cursorAxisRanges[n] = model.getProject().getRotatedBoundingBox().getCursorAxisRange(n);
             cursorTotalAxisRanges[n] = StsMath.copyFloatArray(cursorAxisRanges[n]);
         }
         StsCursor3d cursor3d = glPanel3d.getCursor3d();
@@ -593,6 +593,10 @@ public class StsViewCursor extends StsView2d implements StsSerializable
 //        if(parentCursor3d.selectedDirection == selectedDirection) return;
         axisRanges = cursorAxisRanges[selectedDirection];
         totalAxisRanges = cursorTotalAxisRanges[selectedDirection];
+		// keep axisRanges within totalAxisRanges
+		for(int i = 0; i < 2; i++)
+			for(int j = 0; j < 2; j++)
+				axisRanges[i][j] = StsMath.limitBetweenInclusive(axisRanges[i][j], totalAxisRanges[i][0], totalAxisRanges[i][1]);
 //        glPanel3d.viewChanged = true;
 //        boolean isGridCoordinates = cursor3d.isGridCoordinates();
     }

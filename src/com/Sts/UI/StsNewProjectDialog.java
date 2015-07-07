@@ -73,7 +73,7 @@ public class StsNewProjectDialog extends JDialog
             timeUnitsBean.setSelectedItem(project.getTimeUnitString());
             xyUnitsBean.setSelectedItem(project.getXyUnitString());
             depthUnitsBean.setSelectedItem(project.getDepthUnitString());
-            //initialDomainBean.setSelectedItem(project.getZDomainString());
+            //initialDomainBean.setSelectedItem(project.getStringForZDomain());
         }
         catch(Exception ex)
         {

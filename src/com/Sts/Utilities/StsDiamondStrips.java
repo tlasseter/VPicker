@@ -1,5 +1,6 @@
 package com.Sts.Utilities;
 
+import com.Sts.DBTypes.*;
 import com.Sts.Interfaces.*;
 
 import javax.media.opengl.*;
@@ -23,20 +24,19 @@ public class StsDiamondStrips
     float yMin;
     int rowMin;
     int colMin;
-    float[][] leftCenterPointsZ;
-    float[][] botCenterPointsZ;
-    float[][] riteCenterPointsZ;
-    float[][] topCenterPointsZ;
     float[][] pointsZ;
     float[][][] normals;
-    float[][][] leftCenterNormals;
-    float[][][] botCenterNormals;
-    float[][][] riteCenterNormals;
-    float[][][] topCenterNormals;
-    boolean[][] hasRowLinks;
-    boolean[][] hasColLinks;
+	float[][] centerPointsZ;
+    float[][][] centerNormals;
+	StsColor[][] centerColors;
+	/** rowLinks are types: NONE, LINE, ABOVE, BELOW, BOTH. Array is one row larger than grid and is filled with LINK_NONE */
+    byte[][] rowLinks;
+	/** colLinks are types: NONE, LINE, LEFT, RIGHT, BOTH. Array is one col larger than grid and is filled with LINK_NONE */
+    byte[][] colLinks;
+	/** display property on grid */
+	boolean displayProperty = false;
 
-    float[][] values;
+    private float[][] values;
     float[][] rowCenterValues;
     float[][] colCenterValues;
 
@@ -65,24 +65,13 @@ public class StsDiamondStrips
     {
         int row = -1, col = -1;
 
-        leftCenterPointsZ = new float[nRows][nCols];
-        riteCenterPointsZ = new float[nRows][nCols];
-        botCenterPointsZ = new float[nRows][nCols];
-        topCenterPointsZ = new float[nRows][nCols];
-        leftCenterNormals = new float[nRows][nCols][];
-        riteCenterNormals = new float[nRows][nCols][];
-        botCenterNormals = new float[nRows][nCols][];
-        topCenterNormals = new float[nRows][nCols][];
+        centerPointsZ = new float[nRows][nCols];
+        centerNormals = new float[nRows][nCols][];
 
         try
         {
             for (row = 0; row < nRows; row++)
-            {
-                Arrays.fill(leftCenterPointsZ[row], nullValue);
-                Arrays.fill(riteCenterPointsZ[row], nullValue);
-                Arrays.fill(botCenterPointsZ[row], nullValue);
-                Arrays.fill(topCenterPointsZ[row], nullValue);
-            }
+                Arrays.fill(centerPointsZ[row], nullValue);
             // iterate over grid cells and assign values for each
             for (row = 0; row < nRows; row++)
             {
@@ -98,7 +87,8 @@ public class StsDiamondStrips
                     if (hasNextRowLink) nLinks++;
                     if (hasNextColLink) nLinks++;
                     boolean[][] usePoints = getUsePointsFromLinks(hasRowLink, hasColLink, hasNextRowLink, hasNextColLink);
-
+					averageGridCellPointsAndNormals(row, col, usePoints, 1);
+				/*
                     if (nLinks > 2) // we have 3 or 4 links around grid, so use common center and normal
                     {
                         // averages 3 or 4 points and normals, ignoring the null one (all 4 should be present, though)
@@ -106,9 +96,9 @@ public class StsDiamondStrips
                     }
                     else if (nLinks == 2) // could be two links on opposite sides or 2 forming an L; if former than compute two centers, otherwise compute shared center
                     {
-                        if (hasRowLink)
+                        if (computeRowLink)
                         {
-                            if (hasNextRowLink) // compute two column centers and normals 6
+                            if (hasNextRowLink) // compute two column centers and normals
                             {
                                 if(col < nCols+1) botCenterNormals[row][col] = addVectorsNormalize(normals[row][col], normals[row][col + 1]);
                                 if(row < nRows+1) topCenterNormals[row][col] = addVectorsNormalize(normals[row + 1][col], normals[row + 1][col + 1]);
@@ -129,9 +119,9 @@ public class StsDiamondStrips
                         {
                             if (hasNextColLink) // compute two row centers and normals   5
                             {
-                                if(row < nRows+1) leftCenterNormals[row][col] = addVectorsNormalize(normals[row][col], normals[row + 1][col]);
+                                if(row < nRows+1) centerNormals[row][col] = addVectorsNormalize(normals[row][col], normals[row + 1][col]);
                                 if(col < nCols+1) riteCenterNormals[row][col] = addVectorsNormalize(normals[row][col + 1], normals[row + 1][col + 1]);
-                                if(row < nRows+1) leftCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row + 1][col]);
+                                if(row < nRows+1) centerPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row + 1][col]);
                                 if(col < nCols+1) riteCenterPointsZ[row][col] = averageValues(pointsZ[row][col + 1], pointsZ[row + 1][col + 1]);
                             }
                             else //  no rowLink or nextColLink so must have nextRowlink 4
@@ -146,7 +136,7 @@ public class StsDiamondStrips
                     }
                     else if (nLinks == 1)
                     {
-                        if (hasRowLink)
+                        if (computeRowLink)
                         {
                             botCenterNormals[row][col] = addVectorsNormalize(normals[row][col], normals[row][col + 1]);
                             botCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row][col + 1]);
@@ -158,8 +148,8 @@ public class StsDiamondStrips
                         }
                         else if (hasColLink)
                         {
-                            leftCenterNormals[row][col] = addVectorsNormalize(normals[row][col], normals[row + 1][col]);
-                            leftCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row + 1][col]);
+                            centerNormals[row][col] = addVectorsNormalize(normals[row][col], normals[row + 1][col]);
+                            centerPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row + 1][col]);
                         }
                         else // hasNextColLink
                         {
@@ -171,6 +161,7 @@ public class StsDiamondStrips
                     {
 
                     }
+                */
                 }
             }
         }
@@ -203,16 +194,8 @@ public class StsDiamondStrips
 
     private void averageGridCellPointsAndNormals(int row, int col, boolean[][] usePoints, int min)
     {
-        float[] normal = averageGridNormals(row, col, usePoints, min);
-        leftCenterNormals[row][col] = normal;
-        botCenterNormals[row][col] = normal;
-        riteCenterNormals[row][col] = normal;
-        topCenterNormals[row][col] = normal;
-        float centerPointZ = averageGridPoints(row, col, usePoints, min);
-        leftCenterPointsZ[row][col] = centerPointZ;
-        botCenterPointsZ[row][col] = centerPointZ;
-        riteCenterPointsZ[row][col] = centerPointZ;
-        topCenterPointsZ[row][col] = centerPointZ;
+		centerNormals[row][col] = averageGridNormals(row, col, usePoints, min);
+		centerPointsZ[row][col] = averageGridPoints(row, col, usePoints, min);
     }
 
     private float[] averageGridNormals(int row, int col, boolean[][] usePoints, int min)
@@ -264,12 +247,12 @@ public class StsDiamondStrips
 
     private void computeGridRowCenterValues()
     {
-        leftCenterPointsZ = new float[nRows][nCols - 1];
+        centerPointsZ = new float[nRows][nCols - 1];
 
         for (int row = 0; row < nRows; row++)
         {
             for (int col = 0; col < nCols - 1; col++)
-                leftCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row][col + 1]);
+                centerPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row][col + 1]);
         }
     }
 
@@ -279,83 +262,49 @@ public class StsDiamondStrips
         return (v1 + v2) / 2;
     }
 
-    private void computeGridColCenterValues()
-    {
-        botCenterPointsZ = new float[nRows - 1][nCols];
-
-        for (int col = 0; col < nCols; col++)
-        {
-            for (int row = 0; row < nRows - 1; row++)
-                botCenterPointsZ[row][col] = averageValues(pointsZ[row][col], pointsZ[row + 1][col]);
-        }
-    }
-
-    private void computeRowCenterNormals()
-    {
-        leftCenterNormals = new float[nRows][nCols - 1][3];
-
-        for (int row = 0; row < nRows; row++)
-            for (int col = 0; col < nCols - 1; col++)
-                leftCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col], normals[row][col + 1]);
-    }
-
-    private void computeColCenterNormals()
-    {
-        botCenterNormals = new float[nRows - 1][nCols][3];
-
-        for (int col = 0; col < nCols; col++)
-            for (int row = 0; row < nRows - 1; row++)
-                botCenterNormals[row][col] = StsMath.addVectorsNormalize(normals[row][col], normals[row + 1][col]);
-    }
-
     private void computeHasRowLinks()
     {
-        hasRowLinks = new boolean[nRows][nCols];
+        rowLinks = new byte[nRows+1][nCols];
 
         for (int row = 0; row < nRows; row++)
         {
             for (int col = 0; col < nCols - 1; col++)
-                hasRowLinks[row][col] = grid.hasRowLink(row, col);
-            // hasRowLinks[row][nCols - 1] = false;
+                rowLinks[row][col] = grid.computeRowLink(row, col);
+            // rowLinks[row][nCols - 1] = false;
         }
-        // Arrays.fill(hasRowLinks[nRows - 1], false);
+        // Arrays.fill(rowLinks[nRows - 1], false);
     }
 
     private void computeHasColLinks()
     {
-        hasColLinks = new boolean[nRows][nCols];
+        colLinks = new byte[nRows][nCols+1];
 
         for (int col = 0; col < nCols; col++)
         {
             for (int row = 0; row < nRows - 1; row++)
-                hasColLinks[row][col] = grid.hasColLink(row, col);
-            // hasColLinks[nRows-1][col] = false;
+                colLinks[row][col] = grid.computeColLink(row, col);
+            // colLinks[nRows-1][col] = false;
         }
         //for(int row = 0; row < nRows - 1; row++)
-        //    hasColLinks[row][nCols-1] = grid.hasColLink(row, nCols);
+        //    colLinks[row][nCols-1] = grid.hasColLink(row, nCols);
     }
 
     final boolean hasRowLink(int row, int col)
     {
-        if(row < nRows && col < nCols)
-            return grid.hasRowLink(row, col);
-        else
-            return false;
+		return rowLinks[row][col] != StsPatchGrid.LINK_NONE;
     }
 
     final boolean hasColLink(int row, int col)
     {
-        if(row < nRows && col < nCols)
-            return grid.hasColLink(row, col);
-        else
-            return false;
+		return colLinks[row][col] != StsPatchGrid.LINK_NONE;
     }
 
     final float getPointZ(int row, int col)
     {
         float pointZ = pointsZ[row][col];
         if(pointZ != nullValue) return pointZ;
-        StsException.systemError(this, "getPointZ", "Null Z at row: " + row + " col: " + col);
+        StsException.systemError(this, "getPointZ", "NULL Z FOR grid: " + ((StsPatchGrid)grid).id + " at volRow: " + (row + grid.getRowMin()) +
+                " volCol: " + (col + grid.getColMin()));
         return 0.0f;
     }
 
@@ -369,48 +318,29 @@ public class StsDiamondStrips
 
     final float[] getLeftCenterNormal(int row, int col)
     {
-        float[] normal = leftCenterNormals[row][col];
-        if(normal != null) return normal;
+        if(centerNormals[row][col-1] != null) return centerNormals[row][col-1];
         StsException.systemDebug(this, "getLeftCenterNormal", "Failed for row: " + row + " col: " + col);
         return verticalNormal;
      }
 
     final float[] getRiteCenterNormal(int row, int col)
     {
-        float[] normal = riteCenterNormals[row][col];
-        if(normal != null) return normal;
+        if(centerNormals[row][col] != null) return centerNormals[row][col];
         StsException.systemDebug(this, "getRiteCenterNormal", "Failed for row: " + row + " col: " + col);
         return verticalNormal;    }
 
     final float[] getBotCenterNormal(int row, int col)
     {
-        float[] normal = botCenterNormals[row][col];
-        if(normal != null) return normal;
+        if(centerNormals[row-1][col] != null) return centerNormals[row-1][col];
         StsException.systemDebug(this, "getBotCenterNormal", "Failed for row: " + row + " col: " + col);
         return verticalNormal;
     }
 
     final float[] getTopCenterNormal(int row, int col)
     {
-        float[] normal = topCenterNormals[row][col];
-        if(normal != null) return normal;
+        if(centerNormals[row][col] != null) return centerNormals[row][col];
         StsException.systemDebug(this, "getTopCenterNormal", "Failed for row: " + row + " col: " + col);
         return verticalNormal;
-    }
-
-    final float getValue(int row, int col)
-    {
-        return values[row][col];
-    }
-
-    final float getRowCenterValue(int row, int col)
-    {
-        return rowCenterValues[row][col];
-    }
-
-    final float getColCenterValue(int row, int col)
-    {
-        return colCenterValues[row][col];
     }
 
     public void drawSurfaceFillWithNulls(GL gl)
@@ -433,7 +363,7 @@ public class StsDiamondStrips
         {
             float colX = xMin + colMin * xInc;
             for (int col = 0; col < nCols - 1; col++, colX += xInc)
-                if (hasRowLinks[row][col]) drawRowDiamond(gl, row, col, rowY, colX);
+                drawRowDiamond(rowLinks[row][col], row, col, rowY, colX, gl);
         }
     }
 
@@ -444,39 +374,44 @@ public class StsDiamondStrips
         {
             float rowY = yMin + rowMin * yInc;
             for (int row = 0; row < nRows - 1; row++, rowY += yInc)
-                if (hasColLinks[row][col]) drawColDiamond(gl, row, col, rowY, colX);
+                drawColDiamond(colLinks[row][col], row, col, rowY, colX, gl);
         }
     }
 
     /** row diamond is from row,col (left) to row,col+1 (right) with botCenter at row,col (above) and topCenter at row-1,col (below) */
-    private void drawRowDiamond(GL gl, int row, int col, float rowY, float colX)
-    {
-        if (row == 0) // only draw triangle above row axis */
-            drawTopTriangle(gl, row, col, rowY, colX);
-        else if (row == nRows - 1)
-            drawBotTriangle(gl, row, col, rowY, colX);
-        else
-        {
-            try
-            {
-                gl.glBegin(GL.GL_QUADS);
-                drawLeftPoint(gl, row, col, rowY, colX); // left
-                drawBotCenterPoint(gl, row, col, rowY, colX); // below
-                drawRitePoint(gl, row, col, rowY, colX + xInc / 2); // rite
-                drawTopCenterPoint(gl, row, col, rowY, colX); // above
+    private void drawRowDiamond(byte linkType, int row, int col, float rowY, float colX, GL gl)
+	{
+		try
+		{
+			if (linkType == StsPatchGrid.LINK_NONE)
+				return;
 
-                gl.glEnd();
-            }
-            catch(Exception e)
+            if(StsPatchVolume.debug)
             {
-                StsException.outputWarningException(this, "drawRowDiamond", e);
+                float rowDZ = rowDZ(row, col);
+                if(rowDZ > maxDZ)
+                    StsException.systemDebug(this, "DrawRowDiamond", "rowDZ " + rowDZ + " exceeds maxDZ");
             }
-            finally
-            {
-                gl.glEnd();
-            }
-        }
-    }
+
+		//	if(linkType == StsPatchGrid.LINK_NONE)
+		//		drawRowLine(gl, row, col, rowY, colX);
+		//	else // draw above and/or below triangles
+			{
+				if (linkType == StsPatchGrid.LINK_ABOVE || linkType == StsPatchGrid.LINK_BOTH)
+					drawTopTriangle(gl, row, col, rowY, colX);
+				if (linkType == StsPatchGrid.LINK_BELOW || linkType == StsPatchGrid.LINK_BOTH)
+					drawBotTriangle(gl, row, col, rowY, colX);
+			}
+		}
+		catch(Exception e)
+		{
+			StsException.outputWarningException(this, "drawRowDiamond", e);
+		}
+		finally
+		{
+			gl.glEnd();
+		}
+	}
 
     private void drawBotTriangle(GL gl, int row, int col, float rowY, float colX)
     {
@@ -518,47 +453,84 @@ public class StsDiamondStrips
         }
     }
 
+	private void drawRowLine(GL gl, int row, int col, float rowY, float colX)
+	{
+		try
+		{
+			gl.glBegin(GL.GL_LINES);
+			drawLeftPoint(gl, row, col, rowY, colX);
+			drawRitePoint(gl, row, col, rowY, colX);
+			gl.glEnd();
+		}
+		catch(Exception e)
+		{
+			StsException.outputWarningException(this, "drawRowDiamond", e);
+		}
+		finally
+		{
+			gl.glEnd();
+		}
+	}
     /** draw the center below this row in this col which is the topCenter of the row below.
      *  coordinates are at the given row,col, so add xInc/2 and subtract yInc/2 */
     private void drawBotCenterPoint(GL gl, int row, int col, float rowY, float colX)
     {
-        gl.glNormal3fv(getTopCenterNormal(row-1, col), 0);
-        gl.glVertex3f(colX + xInc / 2, rowY - yInc / 2, topCenterPointsZ[row-1][col]);
+        gl.glNormal3fv(getBotCenterNormal(row, col), 0);
+        gl.glVertex3f(colX + xInc / 2, rowY - yInc / 2, centerPointsZ[row-1][col]);
     }
 
     /** draw the center above this row in this col which is the botCenter of this row.
      *  coordinates are at the given row,col, so add xInc/2 and add yInc/2 */
     private void drawTopCenterPoint(GL gl, int row, int col, float rowY, float colX)
     {
-        gl.glNormal3fv(getBotCenterNormal(row, col), 0);
-        gl.glVertex3f(colX + xInc / 2, rowY + yInc / 2, botCenterPointsZ[row][col]);
+        gl.glNormal3fv(getTopCenterNormal(row, col), 0);
+        gl.glVertex3f(colX + xInc / 2, rowY + yInc / 2, centerPointsZ[row][col]);
     }
 
     /** col diamond is from row,col (bot) to row+1,col (top) with centers at row-1,col (left) and row,col (rite) */
-    private void drawColDiamond(GL gl, int row, int col, float rowY, float colX)
+    private void drawColDiamond(byte linkType, int row, int col, float rowY, float colX, GL gl)
     {
-        if (col == 0)
-            drawRiteTriangle(gl, row, col, rowY, colX);
-        else if (col == nCols - 1)
-            drawLeftTriangle(gl, row, col, rowY, colX);
-        else
-        {
-            try
+		try
+		{
+			if (linkType == StsPatchGrid.LINK_NONE) return;
+
+            if(StsPatchVolume.debug)
             {
-                gl.glBegin(GL.GL_QUADS);
-                drawLeftCenterPoint(gl, row, col, rowY, colX);
-                drawBotPoint(gl, row, col, rowY, colX);
-                drawRiteCenterPoint(gl, row, col, rowY, colX);
-                drawTopPoint(gl, row, col, rowY, colX);
-                gl.glEnd();
-            } catch (Exception e)
-            {
-                StsException.outputWarningException(this, "drawRowDiamond", e);
-            } finally
-            {
-                gl.glEnd();
+                float colDZ = colDZ(row, col);
+                if(colDZ > maxDZ)
+                    StsException.systemDebug(this, "drawColDiamond", "colDZ " + colDZ + " exceeds maxDZ");
             }
-        }
+
+        //    if(linkType == StsPatchGrid.LINK_LINE)
+		//		drawColLine(gl, row, col, rowY, colX);
+		//	else // draw left and or right triangles
+			{
+				if (linkType == StsPatchGrid.LINK_LEFT || linkType == StsPatchGrid.LINK_BOTH)
+					drawLeftTriangle(gl, row, col, rowY, colX);
+				if (linkType == StsPatchGrid.LINK_RIGHT || linkType == StsPatchGrid.LINK_BOTH)
+					drawRiteTriangle(gl, row, col, rowY, colX);
+			}
+		}
+		catch (Exception e)
+		{
+			StsException.outputWarningException(this, "drawColDiamond", e);
+		}
+		finally
+		{
+			gl.glEnd();
+		}
+    }
+
+    static final float maxDZ = 20.0f;
+
+    private float colDZ(int row, int col)
+    {
+        return Math.abs(getPointZ(row, col) - getPointZ(row+1, col));
+    }
+
+    private float rowDZ(int row, int col)
+    {
+        return Math.abs(getPointZ(row, col) - getPointZ(row, col+1));
     }
 
     private void drawLeftTriangle(GL gl, int row, int col, float rowY, float colX)
@@ -601,12 +573,31 @@ public class StsDiamondStrips
         }
     }
 
+	private void drawColLine(GL gl, int row, int col, float rowY, float colX)
+	{
+		try
+		{
+			gl.glBegin(GL.GL_LINES);
+			drawBotPoint(gl, row, col, rowY, colX);
+			drawTopPoint(gl, row, col, rowY, colX);
+			gl.glEnd();
+		}
+		catch(Exception e)
+		{
+			StsException.outputWarningException(this, "drawRowDiamond", e);
+		}
+		finally
+		{
+			gl.glEnd();
+		}
+	}
+
     /** draw the center left of this col in this row which is the riteCenter of the cell to the left.
      *  coordinates are at the given row,col, so subtract xInc/2 and add yInc/2 */
     private void drawLeftCenterPoint(GL gl, int row, int col, float rowY, float colX)
     {
-        gl.glNormal3fv(getRiteCenterNormal(row, col - 1), 0);
-        gl.glVertex3f(colX - xInc / 2, rowY + yInc / 2, leftCenterPointsZ[row][col-1]);
+        gl.glNormal3fv(getLeftCenterNormal(row, col), 0);
+        gl.glVertex3f(colX - xInc / 2, rowY + yInc / 2, centerPointsZ[row][col-1]);
     }
 
     /** draw the center rite of this col in this row which is the leftCenter of this cell.
@@ -614,8 +605,8 @@ public class StsDiamondStrips
     private void drawRiteCenterPoint(GL gl, int row, int col, float rowY, float colX)
     {
 
-        gl.glNormal3fv(getLeftCenterNormal(row, col), 0);
-        gl.glVertex3f(colX + xInc / 2, rowY + yInc / 2, leftCenterPointsZ[row][col]);
+        gl.glNormal3fv(getRiteCenterNormal(row, col), 0);
+        gl.glVertex3f(colX + xInc / 2, rowY + yInc / 2, centerPointsZ[row][col]);
     }
 
     private void drawLeftPoint(GL gl, int row, int col, float rowY, float colX)
@@ -635,7 +626,7 @@ public class StsDiamondStrips
 
     private void drawTopPoint(GL gl, int row, int col, float rowY, float colX)
     {
-        drawPoint(gl, row+1, col, rowY + yInc, colX);
+        drawPoint(gl, row + 1, col, rowY + yInc, colX);
     }
 
     private void drawPoint(GL gl, int row, int col, float rowY, float colX)
@@ -643,4 +634,86 @@ public class StsDiamondStrips
         gl.glNormal3fv(getNormal(row, col), 0);
         gl.glVertex3f(colX, rowY, getPointZ(row, col));
     }
+    public void drawGridLines(GL gl)
+    {
+        try
+        {
+            drawRowGridLines(gl);
+            drawColGridLines(gl);
+        }
+        catch(Exception e)
+        {
+            StsException.outputWarningException(this, "drawSurfaceFillWithNulls", e);
+        }
+    }
+
+    private void drawRowGridLines(GL gl)
+    {
+        float rowY = yMin + rowMin * yInc;
+        for (int row = 0; row < nRows; row++, rowY += yInc)
+        {
+            float colX = xMin + colMin * xInc;
+            for (int col = 0; col < nCols - 1; col++, colX += xInc)
+                if (rowLinks[row][col] != StsPatchGrid.LINK_NONE) drawRowGridLine(gl, row, col, rowY, colX);
+        }
+    }
+
+    private void drawRowGridLine(GL gl, int row, int col, float rowY, float colX)
+    {
+        try
+        {
+            gl.glBegin(GL.GL_LINES);
+            drawLeftPoint(gl, row, col, rowY, colX); // left
+            drawRitePoint(gl, row, col, rowY, colX + xInc / 2); // rite
+            gl.glEnd();
+        }
+        catch(Exception e)
+        {
+            StsException.outputWarningException(this, "drawRowDiamond", e);
+        }
+        finally
+        {
+            gl.glEnd();
+        }
+    }
+
+    private void drawColGridLines(GL gl)
+    {
+        float colX = xMin + colMin * xInc;
+        for (int col = 0; col < nCols; col++, colX += xInc)
+        {
+            float rowY = yMin + rowMin * yInc;
+            for (int row = 0; row < nRows - 1; row++, rowY += yInc)
+                if (rowLinks[row][col] != StsPatchGrid.LINK_NONE) drawColGridLine(gl, row, col, rowY, colX);
+        }
+    }
+
+    private void drawColGridLine(GL gl, int row, int col, float rowY, float colX)
+    {
+        try
+        {
+            gl.glBegin(GL.GL_LINES);
+            drawBotPoint(gl, row, col, rowY, colX);
+            drawTopPoint(gl, row, col, rowY, colX);
+            gl.glEnd();
+        }
+        catch (Exception e)
+        {
+            StsException.outputWarningException(this, "drawRowDiamond", e);
+        }
+        finally
+        {
+            gl.glEnd();
+        }
+    }
+
+	public float[][] getValues()
+	{
+		return values;
+	}
+
+	public void setValues(float[][] values)
+	{
+		this.values = values;
+	}
 }

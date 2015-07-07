@@ -32,8 +32,8 @@ public class StsPatchVolumeClass extends StsClass implements StsClassCursorDispl
             };
     }
 
-    public void initializeDefaultFields()
-    {
+	public void initializeDefaultFields()
+	{
 
     }
 

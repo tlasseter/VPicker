@@ -402,6 +402,78 @@ public class StsMath
         return limit1 < value && value < limit2 || limit2 < value && value < limit1;
     }
 
+	public static final float limitBetweenInclusive(float value, float limit1, float limit2)
+	{
+		if(limit1 < limit2)
+		{
+			if(value <= limit1) return limit1;
+			else if(value >= limit2) return limit2;
+			else return value;
+		}
+		else if(limit2 < limit1)
+		{
+			if(value <= limit2) return limit2;
+			else if(value >= limit1) return limit1;
+			else return value;
+		}
+		else  // limits are identical: return this limit
+			return limit1;
+	}
+
+	public static final float limitBetweenExclusive(float value, float limit1, float limit2)
+	{
+		if(limit1 < limit2)
+		{
+			if(value < limit1) return limit1;
+			else if(value > limit2) return limit2;
+			else return value;
+		}
+		else if(limit2 < limit1)
+		{
+			if(value < limit2) return limit2;
+			else if(value > limit1) return limit1;
+			else return value;
+		}
+		else // limit values are identical: no exclusive value between
+			return StsParameters.nullValue;
+	}
+
+	public static final int limitBetweenInclusive(int value, int limit1, int limit2)
+	{
+		if(limit1 < limit2)
+		{
+			if(value < limit1) return limit1;
+			else if(value > limit2) return limit2;
+			else return value;
+		}
+		else if(limit2 < limit1)
+		{
+			if(value < limit2) return limit2;
+			else if(value > limit1) return limit1;
+			else return value;
+		}
+		else  // limits are identical: return this limit
+			return limit1;
+	}
+
+	public static final int limitBetweenExclusive(int value, int limit1, int limit2)
+	{
+		if(limit2 - limit1 > 1)
+		{
+			if(value <= limit1) return limit1 + 1;
+			else if(value >= limit2) return limit2 - 1;
+			else return value;
+		}
+		else if(limit1 - limit2 > 1)
+		{
+			if(value <= limit2) return limit2 + 1;
+			else if(value >= limit1) return limit1 - 1;
+			else return value;
+		}
+		else // limit values have no values between (no exclusive value between), so return null
+			return StsParameters.nullInteger;
+	}
+
     static public int BELOW = -2;
     static public int ON_BELOW = -1;
     static public int BETWEEN = 0;
@@ -445,19 +517,28 @@ public class StsMath
 
     public static final int sign(int number)
     {
-        if (number > 0)
-        {
-            return 1;
-        }
-        else if (number < 0)
-        {
-            return -1;
-        }
-        else
-        {
-            return 0;
-        }
+        if (number > 0) return 1;
+        else if (number < 0) return -1;
+        else return 0;
     }
+
+	public static final int signProduct(int n1, int n2)
+	{
+		if(n1 > 0)
+		{
+			if(n2 > 0) return 1;
+			else if(n2 < 0) return -1;
+			else return 0;
+		}
+		else if(n1 < 0)
+		{
+			if(n2 < 0) return 1;
+			else if(n2 > 0) return -1;
+			else return 0;
+		}
+		else // n1 == 0
+			return 0;
+	}
 
     public static final int sign(float number)
     {
@@ -1075,7 +1156,7 @@ public class StsMath
         {
             return intervalRound(value, min, -interval);
         }
-        return min + interval * Math.round((float) (value - min) / interval);
+        return min + interval * Math.round((value - min) / interval);
     }
 
     public static final int intervalRoundUp(int value, int min, int interval)
@@ -6635,7 +6716,7 @@ public class StsMath
                 {
                     if(hexString.charAt(2) == '0')
                     {
-                        if(debug)
+                        if(debugPatchGrid)
                         {
                             float value = convertIBMFloatBytes(data, offset, getIsLittleEndian);
                             System.out.println("Verify failed, char[2] == '0'.  Bytes are " + data[i] + " " + data[i+1] + " " + data[i+2] + " " + data[i+3] + " value is " + value + " fmant is " + fmant);
@@ -7504,7 +7585,15 @@ remaining = (int[]) StsMath.arrayDeleteElements(array, new int[]{2, 4, 6});
                 }
             }
         }
-        return Math.sqrt(sum / nValues);
+        double amplitude = Math.sqrt(sum / nValues);
+		for (int t = 0; t < nTraces; t++)
+		{
+			if (traces[t] == null) continue;
+			int nSamples = traces[t].length;
+			for (int n = 0; n < nSamples; n++)
+				traces[t][n] /= amplitude;
+		}
+		return amplitude;
     }
 
     public static float[] normalizeAmplitudeRMS(float[] values)

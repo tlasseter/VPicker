@@ -17,10 +17,12 @@ public class StsXYGridBoundingBox extends StsSerialize implements Cloneable
     public int rowMax = -largeInt; // row at yMax
     public int colMin = largeInt; // col at xMin
     public int colMax = -largeInt; // col at xMax
+	public int nRows = 0;
+	public int nCols = 0;
 
-    static public final int largeInt = StsParameters.largeInt;
+	static public final int largeInt = StsParameters.largeInt;
 
-    public StsXYGridBoundingBox()
+	public StsXYGridBoundingBox()
     {
     }
 
@@ -97,6 +99,11 @@ public class StsXYGridBoundingBox extends StsSerialize implements Cloneable
     public boolean isInsideRowCol(int row, int col)
     {
         return row >= rowMin && row <= rowMax && col >= colMin && col <= colMax;
+    }
+
+    public boolean isInsideGridRowCol(int row, int col)
+    {
+        return row >= 0 && row < nRows && col >= 0 && col < nCols;
     }
 
     public boolean addPoint(int row, int col)
@@ -204,6 +211,16 @@ public class StsXYGridBoundingBox extends StsSerialize implements Cloneable
         colMin = Math.max(colMin, box.colMin);
         colMax = Math.min(colMax, box.colMax);
     }
+
+	public int getAbsRow(int relativeRow)
+	{
+		return relativeRow + rowMin;
+	}
+
+	public int getAbsCol(int relativeCol)
+	{
+		return relativeCol + colMin;
+	}
 
     public String toString()
     {

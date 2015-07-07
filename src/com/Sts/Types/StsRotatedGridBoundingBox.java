@@ -1709,7 +1709,7 @@ public class StsRotatedGridBoundingBox extends StsRotatedBoundingBox implements 
      * increases down the Z axis and across the Y-axis so rows are from zMin to zMax
      * and columns are from yMin to yMax, for example.
      */
-    public float[][] getCursorDataRange(int dir)
+    public float[][] getCursorAxisRange(int dir)
     {
         switch (dir)
         {

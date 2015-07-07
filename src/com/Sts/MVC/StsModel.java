@@ -228,7 +228,7 @@ public class StsModel extends StsSerialize
     /**
      * version number (changed with each version release)
      */
-    static public final String version = "3.31";
+    static public final String version = "Picker5";
 
     /**
      * CANNOT_START (red) - required input not available
@@ -3242,11 +3242,11 @@ public class StsModel extends StsSerialize
 
     public StsObject getCurrentObject(Class c)
     {
+		if(StsClass.class.isAssignableFrom(c))
+			StsException.systemError(this, "getCurrentObject",
+				"Developer!  argument must be instance.class, not instanceClass.class! (StsSeismicVolume.class not StsSeismicVolumeClass.class");
         StsClass stsClass = getStsClass(c);
-        if(stsClass == null)
-        {
-            return null;
-        }
+        if(stsClass == null) return null;
         return stsClass.getCurrentObject();
     }
 

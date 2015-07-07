@@ -1299,7 +1299,7 @@ public class StsToolkit
         return getSimpleClassname(object) + "@" + Integer.toHexString(object.hashCode());
     }
 
-    static public Method getAccessor(Class c, String fieldName, String prefix, Class arg)
+    static public Method getAccessorX(Class c, String fieldName, String prefix, Class arg)
     {
         String cap = fieldName.substring(0, 1);
         String accessorName = prefix + cap.toUpperCase() + fieldName.substring(1);
@@ -1331,6 +1331,50 @@ public class StsToolkit
         }
         return accessor;
     }
+
+	static public Method getAccessor(Class c, String fieldName, String prefix, Class arg)
+	{
+		String cap = fieldName.substring(0, 1);
+		String accessorName = prefix + cap.toUpperCase() + fieldName.substring(1);
+		Class iclass = c;
+		for(; iclass != null; iclass = iclass.getSuperclass())
+		{
+			try
+			{
+				Method[] methods = iclass.getDeclaredMethods();
+				if(methods == null) continue;
+				for(Method accessor : methods)
+				{
+					if(!accessor.getName().equals(accessorName)) continue;
+					accessor.setAccessible(true);
+					if(arg == null) return accessor;
+					Class[] argTypes = accessor.getParameterTypes();
+					if(argTypes.length > 1) continue;
+					if(argTypes[0] != arg) continue;
+					return accessor;
+				}
+			}
+			catch(Exception e)
+			{
+				if(arg != null && arg.equals(Boolean.TYPE))
+				{
+					Class[] argClass = new Class[] {Boolean.TYPE};
+					try
+					{
+						Method accessor = iclass.getDeclaredMethod(accessorName, argClass);
+						if(accessor != null) return accessor;
+					}
+					catch(Exception ex)
+					{
+						StsException.outputWarningException(StsToolkit.class, "getAccessor", "Failed. couldn't find class.method " + c.getName() + "." + fieldName +
+						" with args " + Arrays.toString(argClass), ex);
+					}
+				}
+				return null;
+			}
+		}
+		return null;
+	}
 
     public static boolean clean(final ByteBuffer buffer)
     {

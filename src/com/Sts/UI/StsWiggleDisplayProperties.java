@@ -198,7 +198,7 @@ public class StsWiggleDisplayProperties extends StsSeismicPanelProperties implem
         attributeSelectBean = new StsComboBoxFieldBean(this, "AttributeName", "Display Trace Attribute:", attributes);
         tpiBean = new StsFloatFieldBean(this, "tracesPerInch", 1.f, 250.f, "Traces per Inch:");
         ipsBean = new StsFloatFieldBean(this, "inchesPerSecond", .1f, 50.0f, "Inches per Second:");
-        wiggleOverlapPercentBean = new StsIntFieldBean(this, "wiggleOverlapPercent", 0, overlapPercentMax, "Gain (Overlap Percent):", true);
+        wiggleOverlapPercentBean = new StsIntFieldBean(this, "wiggleOverlapPercent", -90, overlapPercentMax, "Gain (Overlap Percent):", true);
         wiggleOverlapPercentBean.setStep(25);
         stretchMuteBean = new StsFloatFieldBean(this, "stretchMute", 0, stretchMuteMax, "Stretch Mute (%):");
         stretchMuteBean.fixStep(1.0);
