@@ -46,7 +46,7 @@ import java.util.*;
  * See <a href="surfaceCoorSystem.html">Surface Coor System</a> for details.
  */
 public class StsSurface extends StsRotatedGridBoundingBox implements StsSelectable, StsXYSurfaceGridable, StsTreeObjectI,
-    ItemListener, StsTextureSurfaceFace, StsDistanceTransformInterpolationFace, StsCultureDisplayable
+    ItemListener, StsTextureSurfaceFace, StsDistanceTransformFace, StsCultureDisplayable
 {
     /** indicates the surfaces has nulls requiring special display routines */
     protected boolean hasNulls = false;
@@ -2047,7 +2047,7 @@ public class StsSurface extends StsRotatedGridBoundingBox implements StsSelectab
                 yInc, xInc};
     }
 
-    public float distanceTransformInterpolation(int row, int col, StsDistanceTransformPoint[] points, float maxInterpolationDistance)
+    public float doDistanceTransform(int row, int col, StsDistanceTransformPoint[] points)
     {
         float weight;
 

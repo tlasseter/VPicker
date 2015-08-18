@@ -183,6 +183,14 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 		return true;
 	}
 
+	static public StsPatchGrid getLargestGrid(StsPatchGrid patchGrid0, StsPatchGrid patchGrid1)
+	{
+		if(patchGrid0.nPatchPoints >= patchGrid1.nPatchPoints)
+			return patchGrid0;
+		else
+			return patchGrid1;
+	}
+
 	/**
 	 * We wish to merge the points from removedGrid into this one.  Copy both sets of points to a new grid which is union of two.
 	 * reset the removedGrid patchPoints.id to this id

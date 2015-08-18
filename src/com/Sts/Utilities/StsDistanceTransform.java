@@ -17,7 +17,6 @@ import java.util.*;
 
 public class StsDistanceTransform
 {
-    StsRotatedGridBoundingBox boundingBox;
     public float[][] distances;
     int nRows, nCols;
     float rowInc, colInc;

@@ -15,7 +15,7 @@ import com.Sts.UI.Progress.*;
 
 public class StsDistanceTransformInterpolation
  {
-    StsDistanceTransformInterpolationFace distanceTransformObject;
+    StsDistanceTransformFace distanceTransformObject;
     float[][] distances;
     int nRows, nCols;
     boolean debug = false;
@@ -24,7 +24,7 @@ public class StsDistanceTransformInterpolation
 
     static final float largeFloat = StsParameters.largeFloat;
 
-    public StsDistanceTransformInterpolation(StsDistanceTransformInterpolationFace distanceTransformObject, boolean debug)
+    public StsDistanceTransformInterpolation(StsDistanceTransformFace distanceTransformObject, boolean debug)
     {
         this.distanceTransformObject = distanceTransformObject;
         this.nRows = distanceTransformObject.getNRows();
@@ -88,7 +88,7 @@ public class StsDistanceTransformInterpolation
                         points[2].initialize(row-1, col, distances);
                         points[3].initialize(row-1, col+1, distances);
                         points[4].initialize(row, col-1, distances);
-                        newDistance = distanceTransformObject.distanceTransformInterpolation(row, col, points, maxInterpolationDistance);
+                        newDistance = distanceTransformObject.doDistanceTransform(row, col, points);
                         if(newDistance != distance || newDistance == largeFloat) converged = false;
                         distances[row][col] = newDistance;
                     }
@@ -120,7 +120,7 @@ public class StsDistanceTransformInterpolation
                         points[2].initialize(row+1, col, distances);
                         points[3].initialize(row+1, col+1, distances);
                         points[4].initialize(row, col+1, distances);
-                        newDistance = distanceTransformObject.distanceTransformInterpolation(row, col, points, maxInterpolationDistance);
+                        newDistance = distanceTransformObject.doDistanceTransform(row, col, points);
                         if(newDistance != distance || newDistance == largeFloat) converged = false;
                         distances[row][col] = newDistance;
                      }
@@ -151,7 +151,7 @@ public class StsDistanceTransformInterpolation
                         points[2].initialize(row-1, col, distances);
                         points[3].initialize(row-1, col+1, distances);
                         points[4].initialize(row, col+1, distances);
-                        newDistance = distanceTransformObject.distanceTransformInterpolation(row, col, points, maxInterpolationDistance);
+                        newDistance = distanceTransformObject.doDistanceTransform(row, col, points);
                         if(newDistance != distance || newDistance == largeFloat) converged = false;
                         distances[row][col] = newDistance;
                      }
@@ -182,7 +182,7 @@ public class StsDistanceTransformInterpolation
                         points[2].initialize(row+1, col, distances);
                         points[3].initialize(row+1, col+1, distances);
                         points[4].initialize(row, col-1, distances);
-                        newDistance = distanceTransformObject.distanceTransformInterpolation(row, col, points, maxInterpolationDistance);
+                        newDistance = distanceTransformObject.doDistanceTransform(row, col, points);
                         if(newDistance != distance || newDistance == largeFloat) converged = false;
                         distances[row][col] = newDistance;
                      }

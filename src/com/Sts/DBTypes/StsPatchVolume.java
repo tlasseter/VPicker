@@ -431,6 +431,26 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
 
 		return mergedGrid;
 	}
+	protected StsPatchGrid checkAddOverlappingConnection(PatchPoint prevPatchPoint, PatchPoint patchPoint, Connection connection)
+	{
+		StsPatchGrid prevPatchGrid = prevPatchPoint.getPatchGrid();
+		StsPatchGrid patchGrid = patchPoint.getPatchGrid();
+
+		if(StsPatchVolume.debug && (StsPatchGrid.doDebugPoint(patchPoint) || StsPatchGrid.doDebugPoint(prevPatchPoint)))
+			StsException.systemDebug(this, "mergeOverlappingPatchGrids", StsPatchVolume.iterLabel + " CONNECT point: " +
+					patchPoint.toString() + " TO point: " + prevPatchPoint.toString());
+
+		// if points for this connection mutually overlap the other grid, ignore this connection
+		// alternatively, we could make a new patchGrid containing clones of these two connection points
+		if (prevPatchGrid.patchPointOverlaps(patchPoint) && patchGrid.patchPointOverlaps(prevPatchPoint))
+			return null;
+		else if (prevPatchGrid.patchPointOverlaps(patchPoint))
+			return patchGrid;
+		else if(patchGrid.patchPointOverlaps(prevPatchPoint))
+			return prevPatchGrid;
+		else // connection itself doesn't overlap, so add connection to largest patch
+			return StsPatchGrid.getLargestGrid(patchGrid, prevPatchGrid);
+	}
 
 	/** We wish to merge two patchGrids which are connected between these two points.  The two grids overlap.
 	 *  If one of the points in the connection doesn't overlap the other grid, then add this point to the other grid.
@@ -2478,12 +2498,12 @@ class TracePoints
 				if (StsPatchGrid.mergePatchPointsOK(otherPatchGrid, newPatchGrid))
 				{
 					patchGrid = patchVolume.mergePatchGrids(otherPatchPoint, newPatchPoint);
-					if (patchGrid == null)
-						return null; // error occurred: systemError written in mergePatchGrids routine
+					// if patchGrid==null error occurred: systemError written in mergePatchGrids routine
 				}
 				else
 				{
-					patchGrid = patchVolume.mergeOverlappingPatchGrids(otherPatchPoint, newPatchPoint, connection);
+					patchGrid = patchVolume.checkAddOverlappingConnection(otherPatchPoint, newPatchPoint, connection);
+					//	patchGrid = patchVolume.mergeOverlappingPatchGrids(otherPatchPoint, newPatchPoint, connection);
 					patchVolume.checkAddPatchGridToRowGrids(patchGrid);
 				}
 			}

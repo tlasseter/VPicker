@@ -664,7 +664,7 @@ public class StsDiamondStrips
         {
             gl.glBegin(GL.GL_LINES);
             drawLeftPoint(gl, row, col, rowY, colX); // left
-            drawRitePoint(gl, row, col, rowY, colX + xInc / 2); // rite
+            drawRitePoint(gl, row, col, rowY, colX); // rite
             gl.glEnd();
         }
         catch(Exception e)
@@ -684,7 +684,7 @@ public class StsDiamondStrips
         {
             float rowY = yMin + rowMin * yInc;
             for (int row = 0; row < nRows - 1; row++, rowY += yInc)
-                if (rowLinks[row][col] != StsPatchGrid.LINK_NONE) drawColGridLine(gl, row, col, rowY, colX);
+                if (colLinks[row][col] != StsPatchGrid.LINK_NONE) drawColGridLine(gl, row, col, rowY, colX);
         }
     }
 

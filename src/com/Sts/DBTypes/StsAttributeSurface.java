@@ -16,7 +16,7 @@ import com.Sts.Utilities.*;
 import java.awt.event.*;
 
 public class StsAttributeSurface extends StsSurface implements StsSelectable, StsXYSurfaceGridable, StsTreeObjectI,
-                  ItemListener, StsTextureSurfaceFace, StsDistanceTransformInterpolationFace, StsCultureDisplayable
+                  ItemListener, StsTextureSurfaceFace, StsDistanceTransformFace, StsCultureDisplayable
 {
     /** colorscale for depth display */
     protected StsColorscale[] attributeColorscale = null;

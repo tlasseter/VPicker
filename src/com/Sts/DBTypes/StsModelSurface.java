@@ -2068,7 +2068,7 @@ public class StsModelSurface extends StsSurface implements StsSelectable, StsXYS
         return distances;
     }
 
-    public float distanceTransformInterpolation(int row, int col, StsDistanceTransformPoint[] points, float maxInterpolationDistance)
+    public float doDistanceTransform(int row, int col, StsDistanceTransformPoint[] points)
     {
         float weight;
 

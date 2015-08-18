@@ -27,7 +27,7 @@ import static com.Sts.Actions.Wizards.Velocity.StsEditVelocityPanel.SPLINES;
  * @author T.J.Lasseter
  * @version c51c
  */
-public class StsVelocityGrid extends StsRotatedGridBoundingBox  // , StsDistanceTransformInterpolationFace
+public class StsVelocityGrid extends StsRotatedGridBoundingBox  // , StsDistanceTransformFace
 {
     StsModelSurface topSurface = null;
     StsModelSurface botSurface = null;
