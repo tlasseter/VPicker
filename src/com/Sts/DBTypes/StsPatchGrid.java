@@ -350,11 +350,11 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 		{
 			if (newChildGrid.isParent()) // parent-parent: assume children are mutually exclusive
 			{
-				checkAddGridsID(newChildGrid);
+				checkAddConnectedGrid(newChildGrid);
 			}
 			else if (newChildGrid.isChild()) // parent-child: use parent-child.parent
 			{
-				checkAddGridsID(newChildGrid.parentGrid);
+				checkAddConnectedGrid(newChildGrid.parentGrid);
 			}
 			else // parent-new
 			{
@@ -365,7 +365,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 		{
 			if (isChild())  // child-parent
 			{
-				parentGrid.checkAddGridsID(newChildGrid);
+				parentGrid.checkAddConnectedGrid(newChildGrid);
 			}
 			else // new-parent
 			{
@@ -378,7 +378,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 			{
 				if (newChildGrid.isChild()) // child-child, use parent with lowest ID
 				{
-					newChildGrid.parentGrid.checkAddGridsID(parentGrid);
+					newChildGrid.parentGrid.checkAddConnectedGrid(parentGrid);
 				}
 				else // child-new
 				{
@@ -392,7 +392,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 			}
 			else // new-new; make parent of one with lowest ID
 			{
-				checkAddGridsID(newChildGrid);
+				checkAddConnectedGrid(newChildGrid);
 			}
 		}
 	}
@@ -453,7 +453,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 		return " gridType: " + gridFamilyType + " grids: " + nGrids + " nPoints: " + nPatchPoints;
 	}
 
-	private final void checkAddGridsID(StsPatchGrid newChildGrid)
+	private final void checkAddConnectedGrid(StsPatchGrid newChildGrid)
 	{
 		if (this == newChildGrid) return;
 		if (newChildGrid.id < id)
@@ -674,31 +674,64 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 		}
 	}
 
+	boolean addChangePatchPoint(PatchPoint patchPoint)
+	{
+		if(!addPatchPoint(patchPoint)) return false;
+		patchPoint.setPatchGrid(this);
+		return true;
+	}
+
+	boolean checkAddPatchPoint(PatchPoint patchPoint)
+	{
+		if (debug && debugPoint && (doDebugPoint(patchPoint)))
+			StsException.systemDebug(this, "checkAddPatchPoint", StsPatchVolume.iterLabel + "CHECK ADD POINT TO GRID: " + id + " POINT: " + patchPoint.toString());
+
+		if(!initializeAddPatchPoint(patchPoint)) return false;
+		PatchPoint currentPoint = patchPoints[patchPoint.getRow() - rowMin][patchPoint.getCol() - colMin];
+		if (currentPoint != null) return true;
+		patchPoints[patchPoint.getRow() - rowMin][patchPoint.getCol() - colMin] = patchPoint;
+		nPatchPoints++;
+		return true;
+	}
+	/** Try to add this point to this patch.  If there is the same point already at this location,
+	 *  don't readd and return true.  If there is a different point at this location, return false;
+	 *  If no point at this location, expand grid to contain it if necessary and add and return true.
+	 *
+	 * @param patchPoint
+	 * @return
+	 */
 	boolean addPatchPoint(PatchPoint patchPoint)
 	{
 		// if (debugPatchGrid && id == debugPatchID)
 		if (debug && debugPoint && (doDebugPoint(patchPoint)))
 			StsException.systemDebug(this, "addPatchPoint", StsPatchVolume.iterLabel + "ADD POINT TO GRID: " + id + " POINT: " + patchPoint.toString());
 
+		if(!initializeAddPatchPoint(patchPoint)) return false;
+
+		PatchPoint currentPoint = patchPoints[patchPoint.getRow() - rowMin][patchPoint.getCol() - colMin];
+		if (currentPoint != null)
+		{
+			if(currentPoint == patchPoint) return true;
+
+			StsException.systemError(this, "addPatchPoint", "pointGrid " + rowColGrid.toString() + " ALREADY HAS Point with different id. " + currentPoint.toString() +
+				" so can't add " + patchPoint.toString());
+			return false;
+		}
+		patchPoints[patchPoint.getRow() - rowMin][patchPoint.getCol() - colMin] = patchPoint;
+		nPatchPoints++;
+		return true;
+	}
+
+	boolean initializeAddPatchPoint(PatchPoint patchPoint)
+	{
 		if (patchPoints == null)
 			initializePatchPoints(patchPoint);
 		else
 			checkAdjustGrid(patchPoint);
-		if (!contains(patchPoint))
-		{
-			StsException.systemError(this, "addPatchPoint", "pointGrid " + rowColGrid.toString() + " doesn't contain window " + patchPoint.toString());
-			return false;
-		}
-		if (patchPoints[patchPoint.getRow() - rowMin][patchPoint.getCol() - colMin] != null)
-		{
-			StsException.systemError(this, "addPatchPoint", "pointGrid " + rowColGrid.toString() + " ALREADY HAS Point " + patchPoints[patchPoint.getRow() - rowMin][patchPoint.getCol() - colMin].toString() +
-					" so can't add " + patchPoint.toString());
-			return false;
-		}
-		patchPoints[patchPoint.getRow() - rowMin][patchPoint.getCol() - colMin] = patchPoint;
-		patchPoint.setPatchGrid(this);
-		nPatchPoints++;
-		return true;
+		if (contains(patchPoint))  return true;
+
+		StsException.systemError(this, "addPatchPoint", "pointGrid " + rowColGrid.toString() + " doesn't contain window " + patchPoint.toString());
+		return false;
 	}
 
 	void setPoint(PatchPoint patchPoint)
@@ -1202,7 +1235,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 				if (fromState == GRID_UNCHANGED)
 				{
 					PatchPoint clonedToPoint = toConnectedPoint.cloneAndClear();
-					if (!addPatchPoint(clonedToPoint))
+					if (!addChangePatchPoint(clonedToPoint))
 					{
 						StsException.systemError(this, "moveNonOverlappingPointsTo", "FAILED TRYING to ADD CLONED POINT TO fromGrid " + toConnectedPoint.toString());
 						patchGrid = null;
@@ -1368,7 +1401,7 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 						movePoint(this, fromPoint, patchPoints, this.rowColGrid, toGrid, toPatchPoint, toPatchPoints, toRowColGrid);
 
 					PatchPoint clonedPoint = smallPatchPoint.clone();
-					patchGrid.addPatchPoint(smallPatchPoint);
+					patchGrid.addChangePatchPoint(smallPatchPoint);
 					smallPatchGrid.replacePoint(clonedPoint);
 					connection.resetConnection(smallPatchPoint, orderReversed);
 					if (StsPatchVolume.debugOverlapGridGroupOK) patchGrid.combineChildGrids(patchGrid);
@@ -1783,13 +1816,13 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 		if (patchPointOverlaps(patchPoint))
 		{
 			StsPatchGrid newPatchGrid = StsPatchGrid.construct(patchVolume, patchType);
-			newPatchGrid.addPatchPoint(patchPoint);
-			newPatchGrid.addPatchPoint(connectedPatchPoint.cloneAndClear());
+			newPatchGrid.addChangePatchPoint(patchPoint);
+			newPatchGrid.addChangePatchPoint(connectedPatchPoint.cloneAndClear());
 			return newPatchGrid;
 		}
 		else
 		{
-			addPatchPoint(patchPoint);
+			addChangePatchPoint(patchPoint);
 			return this;
 		}
 	}
@@ -1951,23 +1984,43 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 	private float getRowCorrelation(int row, int col)
 	{
 		if (col >= nCols - 1) return 0.0f;
-		PatchPoint otherPoint = patchPoints[row][col + 1];
-		if (otherPoint == null) return 0.0f;
-		Connection connection = otherPoint.getRowConnection();
-		if (connection == null || connection.isMoved) return 0.0f;
-		//return connection.stretchCorrelation;
-		return connection.window.stretchCorrelation;
+		PatchPoint nextPoint = patchPoints[row][col + 1];
+		if (nextPoint == null) return 0.0f;
+		Connection connection = nextPoint.getRowConnection();
+		if(connection == null) return 0.0f;
+		int prevID = connection.getPrevPoint().getID();
+		int nextID = connection.getNextPoint().getID();
+		if(prevID == nextID || prevID == id)
+		{
+			if(prevID != id)
+				pointsZ[row][col] = connection.getPrevPoint().z;
+			if(nextID != id)
+				pointsZ[row][col+1] = connection.getNextPoint().z;
+			return connection.window.stretchCorrelation;
+		}
+		else
+			return 0.0f;
 	}
 
 	private float getColCorrelation(int row, int col)
 	{
 		if (row >= nRows - 1) return 0.0f;
-		PatchPoint otherPoint = patchPoints[row + 1][col];
-		if (otherPoint == null) return 0.0f;
-		Connection connection = otherPoint.getColConnection();
-		if (connection == null || connection.isMoved) return 0.0f;
-		//return connection.stretchCorrelation;
-		return connection.window.stretchCorrelation;
+		PatchPoint nextPoint = patchPoints[row + 1][col];
+		if (nextPoint == null) return 0.0f;
+		Connection connection = nextPoint.getColConnection();
+		if(connection == null) return 0.0f;
+		int prevID = connection.getPrevPoint().getID();
+		int nextID = connection.getNextPoint().getID();
+		if(prevID == nextID || prevID == id)
+		{
+			if(prevID != id)
+				pointsZ[row][col] = connection.getPrevPoint().z;
+			if(nextID != id)
+				pointsZ[row+1][col] = connection.getNextPoint().z;
+			return connection.window.stretchCorrelation;
+		}
+		else
+			return 0.0f;
 	}
 
 	/** get nearest patch whose z at this x,y is just above the z slice plane */
@@ -2996,7 +3049,30 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 
 	public PatchPoint getVolPatchPoint(PatchPoint patchPoint)
 	{
+		if(patchPoint == null) return null;
 		return getVolPatchPoint(patchPoint.getRow(), patchPoint.getCol());
+	}
+
+	/** Given an existing patchPoint probably on another grid: find point at same location on this grid - pointOnGrid;
+	 *  if it doesn't exist, clone patchPoint onto this grid and return; if pointOnGrid is already cloned,
+	 *  then use that one; if pointOnGrid is different slice than patchPoint, then they are different so return null;
+	 *  if pointOnGrid is same as patchPoint (shouldn't happen though), clone it and return it.
+	 *
+	 * @param patchPoint
+	 * @return
+	 */
+	public PatchPoint getClonedPointOnGrid(PatchPoint patchPoint)
+	{
+		if(patchPoint == null) return null;
+		PatchPoint pointOnGrid = getVolPatchPoint(patchPoint);
+		if(pointOnGrid == null)
+			return patchPoint.cloneOnGrid(this);
+		else if(pointOnGrid.isCloned())
+			return pointOnGrid;
+		else if(pointOnGrid == patchPoint)
+			return pointOnGrid;
+		else // pointOnGrid and patchPoint are not the same, so return null
+			return null;
 	}
 
 	/**
@@ -3044,18 +3120,52 @@ public class StsPatchGrid extends StsXYGridBoundingBox implements Comparable<Sts
 		return row >= 0 && row < nRows && col >= 0 && col < nCols;
 	}
 
+	/** check if a rowLink exists from this point to the point to the right (where the connection exists to this point).
+	 *
+	 * @param patchRow  local patch row of the left point
+	 * @param patchCol  local patch col of the left point
+	 * @return true if a row connection exists from this point to the one to the right
+	 */
 	public boolean hasRowLink(int patchRow, int patchCol)
 	{
 		if (rowCorrels == null) return false;
-		if (!isInsidePatchRowCol(patchRow, patchCol)) return false;
-		return rowCorrels[patchRow][patchCol] > patchVolume.minLinkCorrel;
+		if (!isInsidePatchRowCol(patchRow, patchCol+1)) return false;
+		PatchPoint patchPoint = patchPoints[patchRow][patchCol+1];
+		if(patchPoint == null) return false;
+		Connection connection = patchPoint.getRowConnection();
+		if(connection == null) return false;
+		int prevID = connection.getPrevPoint().getID();
+		if(prevID == -1) return false;
+		int nextID = connection.getNextPoint().getID();
+		if(nextID == -1) return false;
+		if(prevID == nextID || prevID == id)
+			return connection.window.stretchCorrelation > patchVolume.minLinkCorrel;
+		else
+			return false;
 	}
 
+	/** check if a colLink exists from this point to the point above (where the connection exists to this point).
+	 *
+	 * @param patchRow  local patch row of this below point
+	 * @param patchCol  local patch col of this below point
+	 * @return true if a col connection exists from this point to the one above
+	 */
 	public boolean hasColLink(int patchRow, int patchCol)
 	{
 		if (colCorrels == null) return false;
-		if (!isInsidePatchRowCol(patchRow, patchCol)) return false;
-		return colCorrels[patchRow][patchCol] > patchVolume.minLinkCorrel;
+		if (!isInsidePatchRowCol(patchRow+1, patchCol)) return false;
+		PatchPoint patchPoint = patchPoints[patchRow+1][patchCol];
+		if(patchPoint == null) return false;
+		Connection connection = patchPoint.getColConnection();
+		if(connection == null) return false;
+		int prevID = connection.getPrevPoint().getID();
+		if(prevID == -1) return false;
+		int nextID = connection.getNextPoint().getID();
+		if(nextID == -1) return false;
+		if(prevID == nextID || prevID == id)
+			return connection.window.stretchCorrelation > patchVolume.minLinkCorrel;
+		else
+			return false;
 	}
 
 	public float getCurvature(int volumeRow, int volumeCol, float dataMin, float dataMax)

@@ -391,6 +391,11 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
 		this.boxFilterWidth = boxFilterWidth;
 	}
 
+	/** These two grid do not overlap.  So merge newest grid (highest id number) into older grid and remove newest.
+	 * @param otherPatchPoint prev row or col point to be connected to newPatchPoint
+	 * @param newPatchPoint current point being processed
+	 * @return mergedGrid which is older of the two (smallest id number)
+	 */
 	protected StsPatchGrid mergePatchGrids(PatchPoint otherPatchPoint, PatchPoint newPatchPoint)
 	{
 		StsPatchGrid mergedGrid, removedGrid;
@@ -431,6 +436,16 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
 
 		return mergedGrid;
 	}
+
+	/** For this new connection between different patches, check if point connected to one patch overlaps the other.
+	 *  If they mutually overlap, then ignore the connection.  If not, return the patch that the connection doesn't overlap;
+	 *  this connection will be added to it.
+	 *
+	 * @param prevPatchPoint prev row or col point connected to the prevGrid
+	 * @param patchPoint point being processed
+	 * @param connection connection between two points
+	 * @return patch which doesn't overlap the point at other end of connection or null if patches mutually overlap at connection
+	 */
 	protected StsPatchGrid checkAddOverlappingConnection(PatchPoint prevPatchPoint, PatchPoint patchPoint, Connection connection)
 	{
 		StsPatchGrid prevPatchGrid = prevPatchPoint.getPatchGrid();
@@ -501,7 +516,7 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
 		if (!newPatchGrid.patchPointOverlaps(otherPatchPoint))
 		{
 			PatchPoint clonedPoint = otherPatchPoint.clone();
-			newPatchGrid.addPatchPoint(otherPatchPoint);
+			newPatchGrid.addChangePatchPoint(otherPatchPoint);
 			otherPatchGrid.setPoint(clonedPoint);
 			if(StsPatchVolume.debugOverlapGridGroupOK) otherPatchGrid.combineChildGrids(otherPatchGrid);
 		}
@@ -511,7 +526,7 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
 		else if (!otherPatchGrid.patchPointOverlaps(newPatchPoint))
 		{
 			PatchPoint clonedPoint = newPatchPoint.clone();
-			otherPatchGrid.addPatchPoint(newPatchPoint);
+			otherPatchGrid.addChangePatchPoint(newPatchPoint);
 			newPatchGrid.setPoint(clonedPoint);
 			clonedPoint.deleteConnection(connection);
 			if (StsPatchVolume.debugOverlapGridGroupOK) otherPatchGrid.combineChildGrids(newPatchGrid);
@@ -520,9 +535,9 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
 		{
 			StsPatchGrid patchGrid = StsPatchGrid.construct(this, otherPatchGrid.patchType);
 			PatchPoint newClonedPoint = newPatchPoint.cloneAndClear();
-			patchGrid.addPatchPoint(newClonedPoint);
+			patchGrid.addChangePatchPoint(newClonedPoint);
 			PatchPoint otherClonedPoint = otherPatchPoint.cloneAndClear();
-			patchGrid.addPatchPoint(otherClonedPoint);
+			patchGrid.addChangePatchPoint(otherClonedPoint);
 			connection.resetConnection(newClonedPoint, otherClonedPoint);
 
 			if(StsPatchVolume.debugOverlapGridGroupOK) patchGrid.combineChildGrids(newPatchGrid);
@@ -588,7 +603,7 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
 		if (!smallPatchGrid.patchPointOverlaps(patchPoint))
 		{
 			PatchPoint clonedPoint = patchPoint.clone();
-			smallPatchGrid.addPatchPoint(patchPoint);
+			smallPatchGrid.addChangePatchPoint(patchPoint);
 			patchGrid.setPoint(clonedPoint);
 			connection.resetConnection(patchPoint, orderReversed);
 			if(StsPatchVolume.debugOverlapGridGroupOK) patchGrid.combineChildGrids(otherPatchGrid);
@@ -597,7 +612,7 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
 		else if (!patchGrid.patchPointOverlaps(smallPatchPoint))
 		{
 			PatchPoint clonedPoint = smallPatchPoint.clone();
-			patchGrid.addPatchPoint(smallPatchPoint);
+			patchGrid.addChangePatchPoint(smallPatchPoint);
 			smallPatchGrid.setPoint(clonedPoint);
 			connection.resetConnection(smallPatchPoint, orderReversed);
 			if (StsPatchVolume.debugOverlapGridGroupOK) patchGrid.combineChildGrids(newPatchGrid);
@@ -607,9 +622,9 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
 		{
 			patchGrid = StsPatchGrid.construct(this, otherPatchGrid.patchType);
 			PatchPoint newClonedPoint = newPatchPoint.cloneAndClear();
-			patchGrid.addPatchPoint(newClonedPoint);
+			patchGrid.addChangePatchPoint(newClonedPoint);
 			PatchPoint otherClonedPoint = otherPatchPoint.cloneAndClear();
-			patchGrid.addPatchPoint(otherClonedPoint);
+			patchGrid.addChangePatchPoint(otherClonedPoint);
 			connection.resetConnection(newClonedPoint, false);
 
 			if(StsPatchVolume.debugOverlapGridGroupOK) patchGrid.combineChildGrids(newPatchGrid);
@@ -629,14 +644,14 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
 		{
 			changedGrid = otherPatchGrid;
 			clonedPoint = newPatchPoint.clone();
-			changedGrid.addPatchPoint(clonedPoint);
+			changedGrid.addChangePatchPoint(clonedPoint);
 			changedGrid.addCorrelation(otherPatchPoint, clonedPoint, correl);
 		}
 		else
 		{
 			changedGrid = newPatchGrid;
 			clonedPoint = otherPatchPoint.clone();
-			changedGrid.addPatchPoint(clonedPoint);
+			changedGrid.addChangePatchPoint(clonedPoint);
 			changedGrid.addCorrelation(clonedPoint, newPatchPoint, correl);
 		}
 		checkAddPatchGridToRowGrids(changedGrid);
@@ -1712,22 +1727,25 @@ public class StsPatchVolume extends StsSeismicBoundingBox implements StsTreeObje
     */
 		// int nSheet = selectedPatch.nSheet;
 
-		StsPatchGrid selectedPatchParent = selectedPatch.getParentGrid();
+		boolean displayChildPatches = getPatchVolumeClass().getDisplayChildPatches();
+		if(displayChildPatches)
+			selectedPatch = selectedPatch.getParentGrid();
+
 		String addRemove;
-		boolean removePatch = StsMath.arrayContains(selectedPatchGrids, selectedPatchParent);
+		boolean removePatch = StsMath.arrayContains(selectedPatchGrids, selectedPatch);
 		if (removePatch)
 			addRemove = " removed ";
 		else
 			addRemove = " added ";
 
-		String gridsString = selectedPatchParent.getGridDescription();
+		String gridsString = selectedPatch.getGridDescription();
 		StsMessageFiles.logMessage("Picked patch: " + selectedPatch.toFamilyString() + addRemove + " " + gridsString);
 
 		if (removePatch)
-			selectedPatchGrids = (StsPatchGrid[]) StsMath.arrayDeleteElement(selectedPatchGrids, selectedPatchParent);
+			selectedPatchGrids = (StsPatchGrid[]) StsMath.arrayDeleteElement(selectedPatchGrids, selectedPatch);
 		else
 		{
-			selectedPatchGrids = (StsPatchGrid[]) StsMath.arrayAddElement(selectedPatchGrids, selectedPatchParent);
+			selectedPatchGrids = (StsPatchGrid[]) StsMath.arrayAddElement(selectedPatchGrids, selectedPatch);
 		}
 		currentModel.win3dDisplayAll();
 	}
@@ -2411,15 +2429,12 @@ class TracePoints
 	public Connection addPatchConnection(Connection connection, ConnectionList connectionList, boolean isRow)
 	{
 		StsPatchGrid patchGrid = null;
-		CorrelationWindow window = connection.window;
-		CorrelationWindow prevWindow = connection.prevWindow;
-		float correlation = prevWindow.stretchCorrelation;
-		// if (stretchCorrelation < patchVolume.minLinkCorrel) return null;
 
 		if(connectionList.connectionsCross(connection)) return null;
 
-		PatchPoint newPatchPoint = window.getCenterPoint();
-		PatchPoint otherPatchPoint = prevWindow.getCenterPoint();
+		PatchPoint newPatchPoint = connection.getNextPoint();
+		PatchPoint otherPatchPoint = connection.getPrevPoint();
+
 		double distance = Math.abs(otherPatchPoint.slice - newPatchPoint.slice);
 
 		if(distance > 20)
@@ -2440,25 +2455,31 @@ class TracePoints
 			if (otherPatchGrid == null) // prevPatchGrid doesn't exist, so create it and add otherPoint to it
 			{
 				patchGrid = StsPatchGrid.construct(patchVolume, newPatchPoint.getPointType(patchVolume.useFalseTypes));
-				patchGrid.addPatchPoint(otherPatchPoint);
+				patchGrid.addChangePatchPoint(otherPatchPoint);
 			}
 			else // otherPatchGrid does exist, so use it
 			{
 				// if this newPatchPoint overlaps the otherPatchGrid, we can't add it;
 				// So create a new patch and add a clone of the otherPatchPoint
-				if (StsPatchVolume.debugCloneOK && otherPatchGrid.patchPointOverlaps(newPatchPoint)) // return null;
+				if (otherPatchGrid.patchPointOverlaps(newPatchPoint)) // return null;
 				{
 					patchGrid = StsPatchGrid.construct(patchVolume, newPatchPoint.pointType);
-					//PatchPoint clonedOtherPatchPoint = otherPatchPoint.cloneAndClear();
-					//patchGrid.addPatchPoint(clonedOtherPatchPoint);
-					//connection.setPrevPoint(clonedOtherPatchPoint);
+					patchGrid.addPatchPoint(otherPatchPoint);
+				/*
+					if (StsPatchVolume.debugCloneOK)
+					{
+						PatchPoint clonedOtherPatchPoint = otherPatchPoint.cloneAndClear();
+						patchGrid.addChangePatchPoint(clonedOtherPatchPoint);
+						connection.setPrevPoint(clonedOtherPatchPoint);
+					}
+				*/
 					otherPatchGrid.combineChildGrids(patchGrid);
 					//splitIntervalOK = false;
 				}
 				else // no overlap, so we will only need to add the newPatchPoint to it (below else)
 					patchGrid = otherPatchGrid;
 			}
-			patchGrid.addPatchPoint(newPatchPoint);
+			patchGrid.addChangePatchPoint(newPatchPoint);
 		}
 		else // newPatchGrid != null which means this window was just added to a patch from prevColTrace and the patchGrid would have been added to the rowGrids array
 		{
@@ -2467,15 +2488,21 @@ class TracePoints
 				patchGrid = newPatchGrid;
 				// otherPatchPoint doesn't have a patchGrid, but newPatchPoint does; try to add otherPatchPoint to newPatchGrid,
 				// but if it overlaps, created a new patchGrid containing otherPatchPoint and a clone of newPatchPoint
-				if (StsPatchVolume.debugCloneOK && patchGrid.patchPointOverlaps(otherPatchPoint))
+				if (patchGrid.patchPointOverlaps(otherPatchPoint))
 				{
 					patchGrid = StsPatchGrid.construct(patchVolume, patchGrid.patchType);
-					//PatchPoint clonedNextPatchPoint = newPatchPoint.cloneAndClear();
-					//patchGrid.addPatchPoint(clonedNextPatchPoint);
-					//connection.setNextPoint(clonedNextPatchPoint);
+					patchGrid.addPatchPoint(newPatchPoint);
+					/*
+					if(StsPatchVolume.debugCloneOK)
+					{
+						PatchPoint clonedNextPatchPoint = newPatchPoint.cloneAndClear();
+						patchGrid.addChangePatchPoint(clonedNextPatchPoint);
+						connection.setNextPoint(clonedNextPatchPoint);
+					}
+                    */
 					newPatchGrid.combineChildGrids(patchGrid);
 				}
-				patchGrid.addPatchPoint(otherPatchPoint);
+				patchGrid.addChangePatchPoint(otherPatchPoint);
 
 				// patchGrid = patchGrid.checkAddPatchPoint(otherPatchPoint, newPatchPoint);
 				//patchGrid.addCorrelation(otherPatchPoint, newPatchPoint, correl);
@@ -2488,7 +2515,7 @@ class TracePoints
 				//checkAddPatchGridToRowGrids(patchGrid);
 				//patchGrid.addCorrelation(otherPatchPoint, newPatchPoint, correl);
 			}
-			// prevPoint and this window belong to different patches: merge newPatchGrid into prevPatchGrid and add connection (below)
+			// otherPatchPoint and newPatchPoint belong to different patches: merge newPatchGrid into otherPatchGrid and add connection (below)
 			// if the grids don't overlap.
 			// If they do overlap, then we merge as many points from the smaller grid to the larger (@see mergeOverlappingPatchGrids);
 			// the connection is added in mergeOverlappingPatchGrids (two connections may have been generated,
@@ -2502,13 +2529,23 @@ class TracePoints
 				}
 				else
 				{
-					patchGrid = patchVolume.checkAddOverlappingConnection(otherPatchPoint, newPatchPoint, connection);
+					addConnectionBetweenPatches(connection);
+					Connection otherConnection = connection.getOtherConnection();
+					if(otherConnection != null)
+						addConnectionBetweenPatches(otherConnection);
+					//otherPatchGrid.checkAddPatchPoint(newPatchPoint);
+					//newPatchGrid.checkAddPatchPoint(otherPatchPoint);
+					patchGrid = newPatchGrid;
+					otherPatchGrid.combineChildGrids(newPatchGrid);
+					//patchGrid = patchVolume.checkAddOverlappingConnection(otherPatchPoint, newPatchPoint, connection);
 					//	patchGrid = patchVolume.mergeOverlappingPatchGrids(otherPatchPoint, newPatchPoint, connection);
 					patchVolume.checkAddPatchGridToRowGrids(patchGrid);
 				}
 			}
 		}
 		if (patchGrid == null) return null;
+
+		connection.addConnectionToPoint();
 
 		// patchGrid is the grid this connection is to go on to;
 		// if both points are on the patchGrid, then we can add the connection to the connection.window.centerPoint (nextPoint);
@@ -2519,7 +2556,7 @@ class TracePoints
 		//      replace the nextPoint.connection with a cloned connection which has the isMoved flag set to true;
 		//      the connection.nextPoint will be replaced by a clone of the nextPoint added to the patchGrid
 		// checkResetClonedPoints(connection, otherPatchPoint, newPatchPoint, isRow);
-		processConnection(connection, patchGrid);
+		// processConnection(connection, patchGrid);
 		// connection.addConnectionToPoint();
 		// ??? if merging overlapped grids, we have two adjust grids; do we need to call checkAddPatchGridToRowGrids for the other as well?
 		patchVolume.checkAddPatchGridToRowGrids(patchGrid);
@@ -2529,6 +2566,16 @@ class TracePoints
 		//	return null;
 	}
 
+	private void addConnectionBetweenPatches(Connection connection)
+	{
+		PatchPoint newPatchPoint = connection.getNextPoint();
+		PatchPoint otherPatchPoint = connection.getPrevPoint();
+
+		StsPatchGrid newPatchGrid = newPatchPoint.patchGrid;
+		StsPatchGrid otherPatchGrid = otherPatchPoint.patchGrid;
+		otherPatchGrid.checkAddPatchPoint(newPatchPoint);
+		newPatchGrid.checkAddPatchPoint(otherPatchPoint);
+	}
 	/** patchGrid is the grid this connection is to go on to;
 	 * if both points are on the patchGrid, then we can add the connection to the connection.window.centerPoint (nextPoint);
 	 * if points are on different grids, we have two cases from processing above:
@@ -2547,24 +2594,26 @@ class TracePoints
 
 		if(nextGrid == prevGrid)
 			connection.addConnectionToPoint();
+		// connection is to be added to nextGrid; clone prevPoint from prevGrid and replace on connection
 		else if(nextGrid == patchGrid)
 		{
 			PatchPoint prevPoint = connection.getPrevPoint();
 			PatchPoint clonedPrevPoint = prevPoint.cloneAndClear();
-			patchGrid.addPatchPoint(clonedPrevPoint);
+			patchGrid.addChangePatchPoint(clonedPrevPoint);
 			connection.setPrevPoint(clonedPrevPoint);
 			connection.addConnectionToPoint();
 		}
+		// connection is to be added to prevGrid; nextPoint and nextPoint otherConnection (if it exists) will be cloned
+		// and added to prevGrid.
 		else if(prevGrid == patchGrid)
 		{
-			Connection clonedConnection = connection.clone();
-			clonedConnection.isMoved = true;
-			PatchPoint nextPoint = connection.getNextPoint();
-			nextPoint.setConnection(clonedConnection);
-			PatchPoint clonedNextPoint = nextPoint.cloneAndClear();
-			patchGrid.addPatchPoint(clonedNextPoint);
-			connection.setNextPoint(clonedNextPoint);
-			connection.addConnectionToPoint();
+			Connection clonedConnection = connection.createClonedConnection(prevGrid);
+			Connection otherConnection = connection.getOtherConnection();
+			Connection clonedOtherConnection = null;
+			if(otherConnection != null)
+				clonedOtherConnection = otherConnection.createClonedConnection(prevGrid);
+			// flag the connection being cloned as "isMoved" so next iterations don't try to make this connection again
+			connection.isMoved = true;
 		}
 		else
 		{
@@ -2572,6 +2621,7 @@ class TracePoints
 					" IS NOT nextGrid " + nextGrid.id + " OR " + prevGrid.id);
 		}
 	}
+
 	private CorrelationWindow findOtherNearestWindow(CorrelationWindow window, ConnectionList connectionList)
 	{
 		// first guess on window closest is at the same window array index
@@ -3115,6 +3165,12 @@ class PatchPoint implements Comparable<PatchPoint>, Cloneable
 		}
 	}
 
+	protected PatchPoint cloneOnGrid(StsPatchGrid patchGrid)
+	{
+		PatchPoint clonedPoint = (PatchPoint) clone();
+		patchGrid.addChangePatchPoint(clonedPoint);
+		return clonedPoint;
+	}
 	/**
 	 * A new point needs to be connected to a grid which already has a point at this location.
 	 * So clone the window and clear any connection data.  This point will be added to the otherGrid
@@ -3142,6 +3198,11 @@ class PatchPoint implements Comparable<PatchPoint>, Cloneable
 		return clonedPoint.patchGrid == patchGrid;
 	}
 
+	public boolean isCloned()
+	{
+		return clonedPoint != null;
+	}
+
 	void clearConnectionData()
 	{
 		deleteRowConnection();
@@ -3151,15 +3212,6 @@ class PatchPoint implements Comparable<PatchPoint>, Cloneable
 
 	void setConnection(Connection connection)
 	{
-		if(StsPatchVolume.debug)
-		{
-			PatchPoint point = connection.window.getCenterPoint();
-			PatchPoint prevPoint = connection.prevWindow.getCenterPoint();
-			if(StsPatchGrid.doDebugPoint(point) || StsPatchGrid.doDebugPoint(prevPoint))
-				StsException.systemDebug(this, "setConnection", StsPatchVolume.iterLabel + " ADJUST CONNECT point: " +
-					point.toString() + " TO point: " + prevPoint.toString());
-		}
-
 		if(connection.isRow)
 			setRowConnection(connection);
 		else
@@ -3753,6 +3805,32 @@ class Connection implements Cloneable
 		}
 	}
 
+	public final Connection getOtherConnection()
+	{
+		if(isRow)
+			return getNextPoint().getColConnection();
+		else
+			return getNextPoint().getRowConnection();
+	}
+
+	/** Create a clone of this connection on this patchGrid. Use cloned points from this grid if they exist or
+	 *  create new cloned points on this grid from this connection
+	 *
+	 * @param patchGrid grid cloned connection is to be built on
+	 * @return the new cloned connection
+	 */
+	public final Connection createClonedConnection(StsPatchGrid patchGrid)
+	{
+		PatchPoint clonedPrevPoint = patchGrid.getClonedPointOnGrid(getPrevPoint());
+		if(clonedPrevPoint == null) return null;
+		PatchPoint clonedNextPoint = patchGrid.getClonedPointOnGrid(getNextPoint());
+		if(clonedNextPoint == null) return null;
+		Connection clonedConnection = clone();
+		clonedConnection.setPrevPoint(clonedPrevPoint);
+		clonedConnection.setNextPoint(clonedNextPoint);
+		return clonedConnection;
+	}
+
 	public void resetConnections(PatchPoint fromPoint, PatchPoint toPoint)
 	{
 		resetConnection(fromPoint);
@@ -3851,8 +3929,8 @@ class Connection implements Cloneable
 		try
 		{
 			Connection clonedConnection = (Connection)super.clone();
-			clonedConnection.window = (CorrelationWindow)window.clone();
-			clonedConnection.prevWindow = (CorrelationWindow)prevWindow.clone();
+			clonedConnection.window = window.clone();
+			clonedConnection.prevWindow = prevWindow.clone();
 			return clonedConnection;
 		}
 		catch (Exception e)
